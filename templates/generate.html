@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>VM MKIII</title>
+    <link rel="stylesheet" href="/generate-assets/style.css?v=4">
+<script src="/generate-assets/main.js?v=4"></script>
+</head>
+<body>
+<div class="container">
+    <div class="sidebar">
+        <h2>학년 선택</h2>
+        <ul id="grade-list">
+            <li data-grade="1" class="grade-item">1학년</li>
+            <li data-grade="2" class="grade-item">2학년</li>
+            <li data-grade="3" class="grade-item">3학년</li>
+        </ul>
+
+        <h2>학교 선택</h2>
+        <ul id="school-list"></ul>
+    </div>
+
+    <div class="main">
+        <div id="selected-info" class="selected-info">
+            학년과 학교를 선택해주세요.
+        </div>
+
+        <!-- ✅ end시트 반영 버튼 -->
+        <button id="refresh-cache-btn" type="button">end시트 반영</button>
+
+        <div id="unit-columns" class="unit-columns">
+            <!-- 학교별 단원 카드가 여기 채워짐 -->
+        </div>
+    </div>
+</div>
+
+<script src="/static/main.js?v=4"></script>
+</body>
+</html>

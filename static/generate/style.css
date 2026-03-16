@@ -1,0 +1,189 @@
+body{
+  margin:0;
+  font-family:sans-serif;
+  background:#111827;
+  color:#e5e7eb;
+  overflow:hidden; /* ✅ 페이지(전체) 스크롤 제거 */
+}
+
+.container{
+  display:flex;
+  height:100vh;
+}
+
+/* ✅ 사이드바: 학년(고정) + 학교목록(스크롤) */
+.sidebar{
+  width:260px;
+  background:#020617;
+  padding:20px;
+  overflow:hidden;            /* ✅ sidebar 자체는 스크롤 X */
+  display:flex;               /* ✅ 위/아래 분리 */
+  flex-direction:column;
+  height:100vh;
+  box-sizing:border-box;
+}
+
+.sidebar h2{
+  margin-bottom:10px;
+  font-size:18px;
+}
+
+.sidebar ul{
+  list-style:none;
+  padding-left:0;
+  margin-bottom:20px;
+}
+
+/* ✅ 학교 목록만 스크롤 */
+#school-list{
+  flex:1 1 auto;              /* ✅ 남은 공간 전부 */
+  min-height:0;               /* ✅ 스크롤 핵심 */
+  overflow-y:auto;            /* ✅ 학교 목록만 스크롤 */
+}
+
+.sidebar li{
+  padding:8px 12px;
+  cursor:pointer;
+  border-radius:8px;
+  margin-bottom:6px;
+  background:#111827;
+  color:#e5e7eb;
+  transition:background 0.15s,color 0.15s;
+}
+
+.sidebar li:hover{
+  background:#1f2937;
+}
+
+.sidebar li.disabled{
+  opacity:0.5;
+  cursor:default;
+}
+
+/* 학년 버튼 */
+#grade-list{
+  display:flex;
+  gap:8px;
+}
+
+#grade-list li{
+  margin-bottom:0;
+  flex:1;
+  text-align:center;
+}
+
+.grade-item.active{
+  background:#2563eb;
+  color:#fff;
+}
+
+/* 학교 색상 규칙 */
+.school-item.has-end{color:#60a5fa;} /* end 시트에 있는 학교(학년기준) - 파랑 텍스트 */
+.school-item.selected{background:#22c55e;color:#022c22;} /* 사용자가 선택한 학교 - 녹색 */
+
+/* ✅ 메인 영역: 오른쪽만 독립 스크롤 */
+.main{
+  flex:1;
+  padding:24px;
+  background:#020617;
+  position:relative;
+  overflow:auto;   /* ✅ 메인 스크롤 */
+  min-height:0;    /* ✅ flex에서 스크롤 안정화 */
+  box-sizing:border-box;
+}
+
+.selected-info{
+  margin-bottom:16px;
+  font-size:16px;
+  font-weight:600;
+}
+
+.unit-columns{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr)); /* 2열 고정 */
+  gap:16px;
+}
+
+/* 학교 카드 */
+.school-card{
+  border:1px solid #1f2937;
+  border-radius:12px;
+  padding:16px;
+  background:#0b1120;
+  display:flex;
+  flex-direction:column;
+  min-height:160px;
+}
+
+.school-card-header{
+  font-size:16px;
+  font-weight:600;
+  margin-bottom:8px;
+}
+
+.school-card-body{
+  flex:1;
+  font-size:14px;
+}
+
+.school-card-body ul{
+  padding-left:18px;
+  margin:0;
+}
+
+.school-card-body li{
+  margin-bottom:4px;
+}
+
+.school-card-footer{
+  margin-top:12px;
+}
+
+.school-card-footer button{
+  margin-right:8px;
+  padding:8px 12px;
+  border-radius:8px;
+  border:none;
+  cursor:pointer;
+  background:#2563eb;
+  color:#fff;
+  font-size:13px;
+}
+
+.school-card-footer button:hover{
+  background:#1d4ed8;
+}
+
+/* Progress bar */
+.progress-bar{
+  display:flex;
+  gap:4px;
+  margin-top:10px;
+}
+
+.progress-cell{
+  width:10px;
+  height:10px;
+  background:#1f2937;
+  border-radius:2px;
+  transition:background 0.15s;
+}
+
+.progress-cell.filled{
+  background:#60a5fa;
+}
+
+.progress-cell.done{
+  background:#22c55e;
+}
+
+.button-grid{
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:8px;
+  margin-bottom:12px;
+}
+
+.button-grid button{
+  width:100%;
+}

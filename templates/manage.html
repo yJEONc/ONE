@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>체크 입력</title>
+  <style>
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { display:flex; height:100vh; }
+    .sidebar { width:260px; border-right:1px solid #ddd; padding:16px; box-sizing:border-box; position:relative; }
+    .main { flex:1; padding:16px; overflow:auto; }
+
+    .label { font-weight:700; margin:12px 0 6px; }
+    .list { display:flex; flex-wrap:wrap; gap:8px; }
+    .btn { padding:8px 10px; border:1px solid #ccc; border-radius:10px; background:#fff; cursor:pointer; }
+    .btn.active { border-color:#333; font-weight:700; }
+    .muted { color:#666; font-size:14px; }
+
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .apply {
+      padding:10px 14px; border:1px solid #333; background:#333; color:#fff;
+      border-radius:10px; cursor:pointer;
+    }
+    .apply:disabled { opacity:.5; cursor:not-allowed; }
+
+    table { border-collapse:collapse; width:100%; table-layout: fixed; }
+    th, td {
+      border-bottom:1px solid #eee;
+      padding:8px 6px;
+      text-align:left;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    th { position:sticky; top:0; background:#fff; border-bottom:1px solid #ddd; z-index:1; }
+
+    th.col-grade, td.col-grade   { width: 60px; text-align:center; }
+    th.col-name,  td.col-name    { width: 120px; }
+    th.col-school,td.col-school  { width: 100px; }
+    th.col-range, td.col-range   { width: 220px; }
+    th.col-period,td.col-period  { width: 110px; }
+    th.col-date,  td.col-date    { width: 85px; }
+
+    th.col-check, td.col-check { width: 120px; text-align:center; }
+
+    /* 직전보강 직보 입력칸 */
+    th.col-jb, td.col-jb { width: 90px; text-align:center; }
+    .jb-input{
+      width: 78px;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      outline: none;
+    }
+    .jb-input:focus{
+      border-color:#333;
+    }
+
+    .marks { display:flex; gap:6px; justify-content:center; }
+    .m {
+      padding:6px 10px;
+      border:1px solid #ccc;
+      border-radius:10px;
+      background:#fff;
+      cursor:pointer;
+      line-height:1;
+      user-select:none;
+      transition: all 0.15s;
+    }
+    .m:hover{ border-color:#666; background:#f3f3f3; }
+    .m.sel { border:2px solid #111; background:#e9f2ff; font-weight:700; transform:scale(1.05); }
+
+    td.pending { background: #fff6cc; }
+
+    .sidebar-bottom {
+      position:absolute;
+      bottom:16px;
+      left:16px;
+      right:16px;
+    }
+
+    /* 모드별 표시 */
+    body[data-mode="class"] .recent-only { display:none; }
+    body[data-mode="recent"] .class-only { display:none; }
+  </style>
+</head>
+<body data-mode="class">
+  <div class="wrap">
+    <aside class="sidebar">
+      <div class="label">학년</div>
+      <div class="list" id="gradeList"></div>
+
+      <div class="label">반</div>
+      <div class="list" id="classList">
+        <div class="muted">학년을 선택하세요</div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <button class="btn" style="width:100%;" id="recentBtn">직전보강</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="label" id="title">학생 명단</div>
+          <div class="muted" id="status">왼쪽에서 학년/반을 선택하세요.</div>
+        </div>
+        <button class="apply" id="applyBtn" disabled>적용 (0)</button>
+      </div>
+
+      <table id="table" style="display:none;">
+        <thead>
+          <tr>
+            <th class="col-grade">학년</th>
+            <th class="col-name">학생명</th>
+            <th class="col-school">학교</th>
+            <th class="col-range">시험범위</th>
+            <th class="col-period">시험기간</th>
+            <th class="col-date">과학일</th>
+
+            <th class="col-check">오투</th>
+            <th class="col-check">서술형</th>
+            <th class="col-check">최다빈출</th>
+            <th class="col-check">모의고사</th>
+
+            <!-- 직전보강에서만 사용 -->
+            <th class="col-jb recent-only">직보1</th>
+            <th class="col-jb recent-only">직보2</th>
+            <th class="col-jb recent-only">직보3</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </main>
+  </div>
+
+<script>
+  const state = {
+    grade: null,
+    className: null,
+    pending: new Map(), // key -> {sheet?, sheet_row, col, value}
+  };
+
+  let mode = "class"; // "class" | "recent"
+
+  const COL_MAP = { otwo: "G", essay: "H", freq: "I", freq_essay: "J" };
+  const JB_COL_MAP = { jb1: "K", jb2: "L", jb3: "M" };
+
+  const gradeList = document.getElementById("gradeList");
+  const classList = document.getElementById("classList");
+  const statusEl = document.getElementById("status");
+  const titleEl = document.getElementById("title");
+  const tableEl = document.getElementById("table");
+  const tbodyEl = document.getElementById("tbody");
+  const applyBtn = document.getElementById("applyBtn");
+  const recentBtn = document.getElementById("recentBtn");
+
+  function setMode(m){
+    mode = m;
+    document.body.dataset.mode = m;
+  }
+
+  function setStatus(msg){ statusEl.textContent = msg; }
+  function escapeHtml(s){
+    return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  function updateApplyBtn(){
+    const n = state.pending.size;
+    applyBtn.textContent = `적용 (${n})`;
+    applyBtn.disabled = (n === 0) || (mode === "class" && (!state.grade || !state.className));
+  }
+
+  function clearPendingUI(){
+    tbodyEl.querySelectorAll("td.pending").forEach(td => td.classList.remove("pending"));
+  }
+
+  function markPending(key, payload){
+    state.pending.set(key, payload);
+    updateApplyBtn();
+  }
+  function unmarkPending(key){
+    state.pending.delete(key);
+    updateApplyBtn();
+  }
+
+  function renderGrades(){
+    gradeList.innerHTML = "";
+    ["1","2","3"].forEach(g => {
+      const b = document.createElement("button");
+      b.className = "btn" + (state.grade === g ? " active":"");
+      b.textContent = g + "학년";
+      b.onclick = () => selectGrade(g);
+      gradeList.appendChild(b);
+    });
+  }
+
+  async function selectGrade(g){
+    setMode("class");
+    state.grade = g;
+    state.className = null;
+    state.pending.clear();
+    updateApplyBtn();
+    renderGrades();
+
+    tableEl.style.display = "none";
+    tbodyEl.innerHTML = "";
+    titleEl.textContent = `학생 명단`;
+    setStatus("반 목록 불러오는 중...");
+
+    classList.innerHTML = "";
+
+    const res = await fetch(`/manage/api/classes?grade=${encodeURIComponent(g)}`);
+    const data = await res.json();
+
+    if(!data.ok){
+      classList.innerHTML = `<div class="muted">반 목록 로드 실패</div>`;
+      setStatus("오류가 발생했습니다.");
+      return;
+    }
+
+    if((data.classes || []).length === 0){
+      classList.innerHTML = `<div class="muted">반이 없습니다(A열 확인)</div>`;
+      setStatus("반이 없습니다.");
+      return;
+    }
+
+    data.classes.forEach(cn => {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = cn;
+      b.onclick = () => selectClass(cn);
+      classList.appendChild(b);
+    });
+
+    setStatus("반을 선택하세요.");
+  }
+
+  function setCellPendingByTd(td, isPending){
+    td.classList.toggle("pending", !!isPending);
+  }
+
+  // ✅ 반 화면: ⭕/△/✕ 버튼 렌더(기존 유지)
+  function renderMarkButtons_Class(sheetRow, fieldName, originalValue){
+    const col = COL_MAP[fieldName];
+    const marks = ["⭕","△","✕"];
+    const wrap = document.createElement("div");
+    wrap.className = "marks";
+
+    let currentValue = originalValue || "";
+
+    marks.forEach(m => {
+      const btn = document.createElement("div");
+      btn.className = "m" + (currentValue === m ? " sel" : "");
+      btn.textContent = m;
+
+      btn.onclick = () => {
+        const alreadySelected = btn.classList.contains("sel");
+        [...wrap.children].forEach(ch => ch.classList.remove("sel"));
+
+        const key = `${sheetRow}:${col}`;
+
+        if(alreadySelected){
+          currentValue = "";
+          if(currentValue === (originalValue || "")){
+            unmarkPending(key);
+          }else{
+            markPending(key, { sheet_row: sheetRow, col, value: "" });
+          }
+          // td pending은 바깥에서 컨트롤
+          return;
+        }
+
+        btn.classList.add("sel");
+        currentValue = m;
+
+        if(currentValue === (originalValue || "")){
+          unmarkPending(key);
+        }else{
+          markPending(key, { sheet_row: sheetRow, col, value: m });
+        }
+      };
+
+      wrap.appendChild(btn);
+    });
+
+    return wrap;
+  }
+
+  async function selectClass(cn){
+    setMode("class");
+    state.className = cn;
+    state.pending.clear();
+    updateApplyBtn();
+
+    [...classList.querySelectorAll("button")].forEach(btn => {
+      btn.classList.toggle("active", btn.textContent === cn);
+    });
+
+    titleEl.textContent = `${state.grade}학년 / ${cn}`;
+    setStatus("학생 명단 불러오는 중...");
+    tableEl.style.display = "none";
+    tbodyEl.innerHTML = "";
+
+    const res = await fetch(`/manage/api/students?grade=${encodeURIComponent(state.grade)}&class=${encodeURIComponent(cn)}`);
+    const data = await res.json();
+
+    if(!data.ok){
+      setStatus("학생 명단 로드 실패");
+      return;
+    }
+
+    const students = data.students || [];
+    if(students.length === 0){
+      setStatus("해당 반 학생이 없습니다(A열 필터 확인).");
+      return;
+    }
+
+    tbodyEl.innerHTML = students.map(st => `
+      <tr data-row="${st.sheet_row}">
+        <td class="col-grade">${escapeHtml(st.grade || state.grade)}</td>
+        <td class="col-name">${escapeHtml(st.name)}</td>
+        <td class="col-school">${escapeHtml(st.school)}</td>
+        <td class="col-range">${escapeHtml(st.range)}</td>
+        <td class="col-period">${escapeHtml(st.period)}</td>
+        <td class="col-date">${escapeHtml(st.exam_date)}</td>
+
+        <td class="col-check class-only" data-field="otwo"></td>
+        <td class="col-check class-only" data-field="essay"></td>
+        <td class="col-check class-only" data-field="freq"></td>
+        <td class="col-check class-only" data-field="freq_essay"></td>
+
+        <!-- 직전보강 전용 컬럼(숨김) -->
+        <td class="col-jb recent-only"></td>
+        <td class="col-jb recent-only"></td>
+        <td class="col-jb recent-only"></td>
+      </tr>
+    `).join("");
+
+    // 체크 버튼 붙이기 + pending 표시 연결
+    students.forEach(st => {
+      const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"]`);
+      const cells = tr.querySelectorAll(`td.col-check.class-only`);
+      cells.forEach(td => {
+        const field = td.getAttribute("data-field");
+        const original = st[field] ?? "";
+        td.classList.remove("pending");
+        td.innerHTML = "";
+        const wrap = renderMarkButtons_Class(st.sheet_row, field, original);
+        td.appendChild(wrap);
+
+        // 버튼 클릭 시 td pending 표시도 같이 갱신되도록 이벤트 후킹
+        wrap.querySelectorAll(".m").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const col = COL_MAP[field];
+            const key = `${st.sheet_row}:${col}`;
+            setCellPendingByTd(td, state.pending.has(key));
+          });
+        });
+      });
+    });
+
+    tableEl.style.display = "";
+    setStatus(`총 ${students.length}명`);
+  }
+
+  // ✅ 직전보강: G~J는 읽기 전용 표시, K~M 입력 가능
+  function renderReadonlyMark(val){
+    const s = String(val || "").trim();
+    return s ? escapeHtml(s) : "";
+  }
+
+  function renderJBInput(sheet, sheetRow, fieldName, originalValue){
+    const col = JB_COL_MAP[fieldName];
+    const key = `${sheet}:${sheetRow}:${col}`;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "jb-input";
+    input.value = String(originalValue || "");
+
+    const td = document.createElement("td");
+    td.className = "col-jb recent-only";
+    td.appendChild(input);
+
+    function syncPending(){
+      const cur = input.value;
+      const orig = String(originalValue || "");
+      if(cur === orig){
+        unmarkPending(key);
+        td.classList.remove("pending");
+      }else{
+        markPending(key, { sheet, sheet_row: sheetRow, col, value: cur });
+        td.classList.add("pending");
+      }
+    }
+
+    input.addEventListener("input", syncPending);
+    return td;
+  }
+
+  async function loadRecent(){
+    setMode("recent");
+    state.pending.clear();
+    updateApplyBtn();
+    clearPendingUI();
+
+    [...classList.querySelectorAll("button")].forEach(btn => btn.classList.remove("active"));
+
+    titleEl.textContent = "직전보강 (과학일 기준 정렬)";
+    setStatus("불러오는 중...");
+    tableEl.style.display = "none";
+    tbodyEl.innerHTML = "";
+
+    const res = await fetch("/manage/api/recent");
+    const data = await res.json();
+
+    if(!data.ok){
+      setStatus("직전보강 로드 실패");
+      return;
+    }
+
+    const students = data.students || [];
+    if(students.length === 0){
+      setStatus("데이터가 없습니다.");
+      return;
+    }
+
+    // 1차: 기본 row + G~J 읽기 전용 + K~M 자리(td는 DOM으로 붙임)
+    tbodyEl.innerHTML = students.map(st => `
+      <tr data-row="${st.sheet_row}" data-sheet="${st.sheet}">
+        <td class="col-grade">${escapeHtml(st.grade)}</td>
+        <td class="col-name">${escapeHtml(st.name)}</td>
+        <td class="col-school">${escapeHtml(st.school)}</td>
+        <td class="col-range">${escapeHtml(st.range)}</td>
+        <td class="col-period">${escapeHtml(st.period)}</td>
+        <td class="col-date">${escapeHtml(st.exam_date)}</td>
+
+        <td class="col-check">${renderReadonlyMark(st.otwo)}</td>
+        <td class="col-check">${renderReadonlyMark(st.essay)}</td>
+        <td class="col-check">${renderReadonlyMark(st.freq)}</td>
+        <td class="col-check">${renderReadonlyMark(st.freq_essay)}</td>
+
+        <td class="col-jb recent-only" data-jb="jb1"></td>
+        <td class="col-jb recent-only" data-jb="jb2"></td>
+        <td class="col-jb recent-only" data-jb="jb3"></td>
+      </tr>
+    `).join("");
+
+    // 2차: K~M 입력칸 DOM으로 삽입 + pending 처리
+    students.forEach(st => {
+      const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"][data-sheet="${st.sheet}"]`);
+      const td1 = tr.querySelector(`td[data-jb="jb1"]`);
+      const td2 = tr.querySelector(`td[data-jb="jb2"]`);
+      const td3 = tr.querySelector(`td[data-jb="jb3"]`);
+
+      td1.innerHTML = ""; td2.innerHTML = ""; td3.innerHTML = "";
+
+      const cell1 = renderJBInput(st.sheet, st.sheet_row, "jb1", st.jb1);
+      const cell2 = renderJBInput(st.sheet, st.sheet_row, "jb2", st.jb2);
+      const cell3 = renderJBInput(st.sheet, st.sheet_row, "jb3", st.jb3);
+
+      // 만들어진 td를 기존 td에 "내용만" 이식
+      td1.appendChild(cell1.firstChild);
+      td2.appendChild(cell2.firstChild);
+      td3.appendChild(cell3.firstChild);
+    });
+
+    tableEl.style.display = "";
+    setStatus(`총 ${students.length}명`);
+  }
+
+  applyBtn.onclick = async () => {
+    if (applyBtn.disabled) return;
+
+    const changes = [...state.pending.values()];
+    setStatus(`적용 중... (${changes.length}건)`);
+
+    const body = (mode === "recent")
+      ? { changes }                       // sheet 포함 (K~M)
+      : { grade: state.grade, changes };  // grade 기반 (G~J)
+
+    try{
+      const res = await fetch("/manage/api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json();
+      if(!data.ok){
+        setStatus(`적용 실패: ${data.error || "unknown error"}`);
+        return;
+      }
+
+      const applied = data.applied ?? 0;
+
+      // pending 초기화 + 하이라이트 제거
+      state.pending.clear();
+      updateApplyBtn();
+      clearPendingUI();
+
+      setStatus(`적용 완료 (${applied}건)`);
+    }catch(e){
+      console.error(e);
+      setStatus("적용 중 오류 발생");
+    }
+  };
+
+  recentBtn.onclick = loadRecent;
+
+  // 초기 렌더
+  renderGrades();
+  updateApplyBtn();
+</script>
+</body>
+</html>

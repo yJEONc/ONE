@@ -1,0 +1,336 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background-color: #f5f7fb;
+    color: #111827;
+}
+
+.app-container {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* ======================
+   사이드바
+   ====================== */
+
+.sidebar {
+    width: 260px;
+    background: #020617;
+    color: #e5e7eb;
+    padding: 24px 16px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+
+    height: 100vh;
+    overflow: hidden;
+}
+
+.sidebar-section {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8px;
+}
+
+.sidebar-section:first-child {
+    flex: 0 0 auto;
+}
+
+.sidebar-section:last-child {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sidebar-title {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #9ca3af;
+    margin-bottom: 8px;
+}
+
+.sidebar-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#schoolList {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 6px;
+}
+
+#gradeList {
+    overflow: visible;
+}
+
+.sidebar-item {
+    padding: 10px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.sidebar-item:hover {
+    background: #111827;
+    transform: translateY(-1px);
+}
+
+.sidebar-item.active {
+    background: #3b82f6;
+    color: #f9fafb;
+}
+
+/* end 시트에 이미 존재하는 학교 표시 */
+.sidebar-item.school-done {
+    color: #60a5fa;
+    font-weight: 700;
+}
+
+.sidebar-item.active.school-done {
+    color: #f9fafb;
+}
+
+/* ======================
+   메인 영역
+   ====================== */
+
+.main-content {
+    flex: 1;
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.main-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.app-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.summary-text {
+    font-size: 14px;
+    color: #6b7280;
+    margin-top: 4px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ======================
+   버튼
+   ====================== */
+
+.primary-btn {
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: none;
+    background: #3b82f6;
+    color: #f9fafb;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 10px 15px -3px rgba(59,130,246,0.4);
+    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.primary-btn:disabled {
+    background: #9ca3af;
+    box-shadow: none;
+    cursor: default;
+}
+
+.primary-btn:not(:disabled):hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+    box-shadow: 0 20px 25px -5px rgba(59,130,246,0.5);
+}
+
+.secondary-btn {
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+
+.secondary-btn:hover {
+    background: #f8fafc;
+    transform: translateY(-1px);
+    border-color: #94a3b8;
+}
+
+.secondary-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* ======================
+   저장 로딩 UI
+   ====================== */
+
+.save-loading {
+    display: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.save-loading.active {
+    display: flex;
+}
+
+.save-loading-track {
+    width: 90px;
+    height: 8px;
+    background: #dbeafe;
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+}
+
+.save-loading-bar {
+    width: 40%;
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 999px;
+    animation: loading-slide 1s infinite ease-in-out;
+}
+
+.save-loading-text {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+@keyframes loading-slide {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(300%);
+    }
+}
+
+/* ======================
+   단원 목록 카드
+   ====================== */
+
+.units-section {
+    background: #ffffff;
+    border-radius: 24px;
+    padding: 20px 24px;
+    box-shadow: 0 10px 30px rgba(15,23,42,0.06);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.unit-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.unit-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.unit-item:hover {
+    background: #f3f4f6;
+}
+
+.unit-item input[type="checkbox"] {
+    cursor: pointer;
+}
+
+.unit-code {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4b5563;
+    min-width: 40px;
+}
+
+.unit-name {
+    font-size: 14px;
+    color: #111827;
+}
+
+/* ======================
+   반응형
+   ====================== */
+
+@media (max-width: 900px) {
+    .app-container {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        flex-direction: row;
+        overflow-x: auto;
+        height: auto;
+        overflow: auto;
+    }
+
+    .sidebar-section:last-child {
+        flex: 0 0 auto;
+        min-height: initial;
+    }
+
+    #schoolList {
+        overflow-y: visible;
+        flex: 0 0 auto;
+        min-height: initial;
+        padding-right: 0;
+    }
+
+    .main-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

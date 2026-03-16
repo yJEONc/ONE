@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>중학교 과학 단원 선택</title>
+    <link rel="stylesheet" href="/survey-assets/style.css">
+<script src="/survey-assets/script.js"></script>
+</head>
+<body>
+<div class="app-container">
+    <!-- 사이드바 -->
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <h2 class="sidebar-title">학년</h2>
+            <ul id="gradeList" class="sidebar-list">
+                <!-- JS로 채움 -->
+            </ul>
+        </div>
+
+        <div class="sidebar-section">
+            <h2 class="sidebar-title">학교</h2>
+            <ul id="schoolList" class="sidebar-list">
+                <!-- JS로 채움 -->
+            </ul>
+        </div>
+    </aside>
+
+    <!-- 메인 영역 -->
+    <main class="main-content">
+        <header class="main-header">
+            <div>
+                <h1 class="app-title">중학교 과학 단원 선택</h1>
+                <p id="currentTermDisplay" class="summary-text">현재 기준 : -</p>
+                <p id="endCacheInfo" class="summary-text">end 캐시 갱신 시각 : -</p>
+                <p id="selectionSummary" class="summary-text">학년과 학교를 선택하세요.</p>
+            </div>
+
+            <div class="header-actions">
+                <button id="refreshEndBtn" class="secondary-btn" type="button">end 시트 업데이트</button>
+
+                <button id="saveBtn" class="primary-btn" disabled>선택 저장</button>
+
+                <div id="saveLoading" class="save-loading" aria-hidden="true">
+                    <div class="save-loading-track">
+                        <div class="save-loading-bar"></div>
+                    </div>
+                    <span class="save-loading-text">...</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="units-section">
+            <h2 class="section-title">단원 목록</h2>
+            <div id="unitList" class="unit-list">
+                <!-- JS로 채움 -->
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

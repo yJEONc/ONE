@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>VM MKIII 로그인</title>
+  <link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body>
+  <div class="container" style="max-width:480px; margin:60px auto;">
+    <h2>VM MKIII 로그인</h2>
+
+    <form method="POST" action="/login" style="margin-top:16px;">
+      <input
+        name="password"
+        type="password"
+        placeholder="비밀번호"
+        style="width:100%; padding:10px;"
+        autofocus
+      />
+      <button type="submit" style="margin-top:12px; padding:10px 14px;">
+        로그인
+      </button>
+    </form>
+
+    {% if error %}
+      <p style="margin-top:12px; color:#ef4444;">{{ error }}</p>
+    {% endif %}
+  </div>
+</body>
+</html>
