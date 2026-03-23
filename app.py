@@ -240,6 +240,20 @@ def ensure_end_cache():
 # =========================================================
 # 2) 내신관리
 # =========================================================
+MANAGE_CACHE = {
+    "1": None,
+    "2": None,
+    "3": None,
+    "loaded_at": {
+        "1": None,
+        "2": None,
+        "3": None,
+    }
+}
+MANAGE_LOCK = threading.Lock()
+MANAGE_CACHE_TTL = 600  # 10분
+
+
 def sheet_name_by_grade(grade: str) -> str:
     if grade not in GRADE_SHEETS:
         raise ValueError("invalid grade")
@@ -288,6 +302,49 @@ def parse_grade_num(s):
         return int(str(s).strip())
     except Exception:
         return 999
+
+
+def load_manage_grade(grade):
+    sheet = sheet_name_by_grade(grade)
+
+    svc = get_sheets_service(readonly=False)
+    resp = svc.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{sheet}!A2:M"
+    ).execute()
+
+    rows = resp.get("values", [])
+
+    with MANAGE_LOCK:
+        MANAGE_CACHE[grade] = rows
+        MANAGE_CACHE["loaded_at"][grade] = time.time()
+
+    return rows
+
+
+def get_manage_grade_rows(grade, force_refresh=False):
+    now = time.time()
+
+    with MANAGE_LOCK:
+        rows = MANAGE_CACHE.get(grade)
+        loaded_at = MANAGE_CACHE["loaded_at"].get(grade)
+
+        if (
+            not force_refresh
+            and rows is not None
+            and loaded_at is not None
+            and (now - loaded_at) < MANAGE_CACHE_TTL
+        ):
+            return rows
+
+    return load_manage_grade(grade)
+
+
+def clear_manage_cache():
+    with MANAGE_LOCK:
+        for g in ("1", "2", "3"):
+            MANAGE_CACHE[g] = None
+            MANAGE_CACHE["loaded_at"][g] = None
 
 
 # =========================================================
@@ -776,26 +833,20 @@ def survey_api_save():
 # 2) 내신관리 API
 # =========================================================
 @app.get("/manage/api/classes")
-@cache.cached(timeout=600, query_string=True)
 def manage_api_classes():
     try:
         grade = request.args.get("grade")
-        sheet = sheet_name_by_grade(grade)
+        rows = get_manage_grade_rows(grade)
 
-        svc = get_sheets_service(readonly=False)
-        resp = svc.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{sheet}!A2:A"
-        ).execute()
-
-        vals = resp.get("values", [])
         classes = []
         seen = set()
-        for v in vals:
-            name = (v[0] if v else "").strip()
+
+        for row in rows:
+            name = (row[0] if len(row) > 0 else "").strip()
             if name and name not in seen:
                 seen.add(name)
                 classes.append(name)
+
         classes.sort()
 
         return jsonify({"ok": True, "grade": grade, "classes": classes})
@@ -804,20 +855,13 @@ def manage_api_classes():
 
 
 @app.get("/manage/api/students")
-@cache.cached(timeout=30, query_string=True)
 def manage_api_students():
     try:
         grade = request.args.get("grade")
         class_name = request.args.get("class")
         sheet = sheet_name_by_grade(grade)
 
-        svc = get_sheets_service(readonly=False)
-        resp = svc.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{sheet}!A2:J"
-        ).execute()
-
-        rows = resp.get("values", [])
+        rows = get_manage_grade_rows(grade)
         students = []
 
         for i, row in enumerate(rows):
@@ -852,18 +896,12 @@ def manage_api_students():
 
 
 @app.get("/manage/api/recent")
-@cache.cached(timeout=20, query_string=True)
 def manage_api_recent():
     try:
-        svc = get_sheets_service(readonly=False)
         all_students = []
 
         for grade, sheet in [("1", "M1"), ("2", "M2"), ("3", "M3")]:
-            resp = svc.spreadsheets().values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"{sheet}!A2:M"
-            ).execute()
-            rows = resp.get("values", [])
+            rows = get_manage_grade_rows(grade)
 
             for i, row in enumerate(rows):
                 def get(idx):
@@ -973,6 +1011,8 @@ def manage_api_apply():
             ).execute()
 
         cache.clear()
+        clear_manage_cache()
+
         return jsonify({"ok": True, "applied": len(updates)})
 
     except Exception as e:
