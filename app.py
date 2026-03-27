@@ -345,7 +345,13 @@ def clear_manage_cache():
         for g in ("1", "2", "3"):
             MANAGE_CACHE[g] = None
             MANAGE_CACHE["loaded_at"][g] = None
-
+def get_manage_cache_status():
+    with MANAGE_LOCK:
+        return {
+            "1": MANAGE_CACHE["loaded_at"].get("1"),
+            "2": MANAGE_CACHE["loaded_at"].get("2"),
+            "3": MANAGE_CACHE["loaded_at"].get("3"),
+        }
 
 # =========================================================
 # 3) 내신자료 생성
@@ -832,6 +838,37 @@ def survey_api_save():
 # =========================================================
 # 2) 내신관리 API
 # =========================================================
+@app.post("/manage/api/refresh")
+def manage_api_refresh():
+    try:
+        data = request.get_json(silent=True) or {}
+        grade = str(data.get("grade") or "").strip()
+
+        refreshed = []
+
+        if grade in GRADE_SHEETS:
+            load_manage_grade(grade)
+            refreshed.append(grade)
+        else:
+            for g in ("1", "2", "3"):
+                load_manage_grade(g)
+                refreshed.append(g)
+
+        status = get_manage_cache_status()
+
+        return jsonify({
+            "ok": True,
+            "message": "내신관리 데이터를 새로 불러왔습니다.",
+            "refreshed": refreshed,
+            "loaded_at": status,
+        })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "trace": traceback.format_exc(),
+        }), 500
+        
 @app.get("/manage/api/classes")
 def manage_api_classes():
     try:
