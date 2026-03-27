@@ -17,11 +17,26 @@
     .muted { color:#666; font-size:14px; }
 
     .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .topbar-actions { display:flex; align-items:center; gap:8px; }
+
     .apply {
       padding:10px 14px; border:1px solid #333; background:#333; color:#fff;
       border-radius:10px; cursor:pointer;
     }
     .apply:disabled { opacity:.5; cursor:not-allowed; }
+
+    .refresh-btn {
+      padding:10px 14px;
+      border:1px solid #999;
+      background:#fff;
+      color:#111;
+      border-radius:10px;
+      cursor:pointer;
+    }
+    .refresh-btn:disabled {
+      opacity:.5;
+      cursor:not-allowed;
+    }
 
     table { border-collapse:collapse; width:100%; table-layout: fixed; }
     th, td {
@@ -43,7 +58,6 @@
 
     th.col-check, td.col-check { width: 120px; text-align:center; }
 
-    /* 직전보강 직보 입력칸 */
     th.col-jb, td.col-jb { width: 90px; text-align:center; }
     .jb-input{
       width: 78px;
@@ -79,7 +93,6 @@
       right:16px;
     }
 
-    /* 모드별 표시 */
     body[data-mode="class"] .recent-only { display:none; }
     body[data-mode="recent"] .class-only { display:none; }
   </style>
@@ -106,7 +119,10 @@
           <div class="label" id="title">학생 명단</div>
           <div class="muted" id="status">왼쪽에서 학년/반을 선택하세요.</div>
         </div>
-        <button class="apply" id="applyBtn" disabled>적용 (0)</button>
+        <div class="topbar-actions">
+          <button class="refresh-btn" id="refreshBtn" type="button">데이터 업데이트</button>
+          <button class="apply" id="applyBtn" disabled>적용 (0)</button>
+        </div>
       </div>
 
       <table id="table" style="display:none;">
@@ -124,7 +140,6 @@
             <th class="col-check">최다빈출</th>
             <th class="col-check">모의고사</th>
 
-            <!-- 직전보강에서만 사용 -->
             <th class="col-jb recent-only">직보1</th>
             <th class="col-jb recent-only">직보2</th>
             <th class="col-jb recent-only">직보3</th>
@@ -139,10 +154,10 @@
   const state = {
     grade: null,
     className: null,
-    pending: new Map(), // key -> {sheet?, sheet_row, col, value}
+    pending: new Map(),
   };
 
-  let mode = "class"; // "class" | "recent"
+  let mode = "class";
 
   const COL_MAP = { otwo: "G", essay: "H", freq: "I", freq_essay: "J" };
   const JB_COL_MAP = { jb1: "K", jb2: "L", jb3: "M" };
@@ -155,15 +170,22 @@
   const tbodyEl = document.getElementById("tbody");
   const applyBtn = document.getElementById("applyBtn");
   const recentBtn = document.getElementById("recentBtn");
+  const refreshBtn = document.getElementById("refreshBtn");
 
   function setMode(m){
     mode = m;
     document.body.dataset.mode = m;
   }
 
-  function setStatus(msg){ statusEl.textContent = msg; }
+  function setStatus(msg){
+    statusEl.textContent = msg;
+  }
+
   function escapeHtml(s){
-    return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;");
   }
 
   function updateApplyBtn(){
@@ -180,6 +202,7 @@
     state.pending.set(key, payload);
     updateApplyBtn();
   }
+
   function unmarkPending(key){
     state.pending.delete(key);
     updateApplyBtn();
@@ -206,42 +229,46 @@
 
     tableEl.style.display = "none";
     tbodyEl.innerHTML = "";
-    titleEl.textContent = `학생 명단`;
+    titleEl.textContent = "학생 명단";
     setStatus("반 목록 불러오는 중...");
 
     classList.innerHTML = "";
 
-    const res = await fetch(`/manage/api/classes?grade=${encodeURIComponent(g)}`);
-    const data = await res.json();
+    try {
+      const res = await fetch(`/manage/api/classes?grade=${encodeURIComponent(g)}`);
+      const data = await res.json();
 
-    if(!data.ok){
+      if(!data.ok){
+        classList.innerHTML = `<div class="muted">반 목록 로드 실패</div>`;
+        setStatus("오류가 발생했습니다.");
+        return;
+      }
+
+      if((data.classes || []).length === 0){
+        classList.innerHTML = `<div class="muted">반이 없습니다(A열 확인)</div>`;
+        setStatus("반이 없습니다.");
+        return;
+      }
+
+      data.classes.forEach(cn => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = cn;
+        b.onclick = () => selectClass(cn);
+        classList.appendChild(b);
+      });
+
+      setStatus("반을 선택하세요.");
+    } catch (e) {
       classList.innerHTML = `<div class="muted">반 목록 로드 실패</div>`;
       setStatus("오류가 발생했습니다.");
-      return;
     }
-
-    if((data.classes || []).length === 0){
-      classList.innerHTML = `<div class="muted">반이 없습니다(A열 확인)</div>`;
-      setStatus("반이 없습니다.");
-      return;
-    }
-
-    data.classes.forEach(cn => {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = cn;
-      b.onclick = () => selectClass(cn);
-      classList.appendChild(b);
-    });
-
-    setStatus("반을 선택하세요.");
   }
 
   function setCellPendingByTd(td, isPending){
     td.classList.toggle("pending", !!isPending);
   }
 
-  // ✅ 반 화면: ⭕/△/✕ 버튼 렌더(기존 유지)
   function renderMarkButtons_Class(sheetRow, fieldName, originalValue){
     const col = COL_MAP[fieldName];
     const marks = ["⭕","△","✕"];
@@ -268,7 +295,6 @@
           }else{
             markPending(key, { sheet_row: sheetRow, col, value: "" });
           }
-          // td pending은 바깥에서 컨트롤
           return;
         }
 
@@ -303,69 +329,69 @@
     tableEl.style.display = "none";
     tbodyEl.innerHTML = "";
 
-    const res = await fetch(`/manage/api/students?grade=${encodeURIComponent(state.grade)}&class=${encodeURIComponent(cn)}`);
-    const data = await res.json();
+    try {
+      const res = await fetch(`/manage/api/students?grade=${encodeURIComponent(state.grade)}&class=${encodeURIComponent(cn)}`);
+      const data = await res.json();
 
-    if(!data.ok){
-      setStatus("학생 명단 로드 실패");
-      return;
-    }
+      if(!data.ok){
+        setStatus("학생 명단 로드 실패");
+        return;
+      }
 
-    const students = data.students || [];
-    if(students.length === 0){
-      setStatus("해당 반 학생이 없습니다(A열 필터 확인).");
-      return;
-    }
+      const students = data.students || [];
+      if(students.length === 0){
+        setStatus("해당 반 학생이 없습니다(A열 필터 확인).");
+        return;
+      }
 
-    tbodyEl.innerHTML = students.map(st => `
-      <tr data-row="${st.sheet_row}">
-        <td class="col-grade">${escapeHtml(st.grade || state.grade)}</td>
-        <td class="col-name">${escapeHtml(st.name)}</td>
-        <td class="col-school">${escapeHtml(st.school)}</td>
-        <td class="col-range">${escapeHtml(st.range)}</td>
-        <td class="col-period">${escapeHtml(st.period)}</td>
-        <td class="col-date">${escapeHtml(st.exam_date)}</td>
+      tbodyEl.innerHTML = students.map(st => `
+        <tr data-row="${st.sheet_row}">
+          <td class="col-grade">${escapeHtml(st.grade || state.grade)}</td>
+          <td class="col-name">${escapeHtml(st.name)}</td>
+          <td class="col-school">${escapeHtml(st.school)}</td>
+          <td class="col-range">${escapeHtml(st.range)}</td>
+          <td class="col-period">${escapeHtml(st.period)}</td>
+          <td class="col-date">${escapeHtml(st.exam_date)}</td>
 
-        <td class="col-check class-only" data-field="otwo"></td>
-        <td class="col-check class-only" data-field="essay"></td>
-        <td class="col-check class-only" data-field="freq"></td>
-        <td class="col-check class-only" data-field="freq_essay"></td>
+          <td class="col-check class-only" data-field="otwo"></td>
+          <td class="col-check class-only" data-field="essay"></td>
+          <td class="col-check class-only" data-field="freq"></td>
+          <td class="col-check class-only" data-field="freq_essay"></td>
 
-        <!-- 직전보강 전용 컬럼(숨김) -->
-        <td class="col-jb recent-only"></td>
-        <td class="col-jb recent-only"></td>
-        <td class="col-jb recent-only"></td>
-      </tr>
-    `).join("");
+          <td class="col-jb recent-only"></td>
+          <td class="col-jb recent-only"></td>
+          <td class="col-jb recent-only"></td>
+        </tr>
+      `).join("");
 
-    // 체크 버튼 붙이기 + pending 표시 연결
-    students.forEach(st => {
-      const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"]`);
-      const cells = tr.querySelectorAll(`td.col-check.class-only`);
-      cells.forEach(td => {
-        const field = td.getAttribute("data-field");
-        const original = st[field] ?? "";
-        td.classList.remove("pending");
-        td.innerHTML = "";
-        const wrap = renderMarkButtons_Class(st.sheet_row, field, original);
-        td.appendChild(wrap);
+      students.forEach(st => {
+        const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"]`);
+        const cells = tr.querySelectorAll(`td.col-check.class-only`);
+        cells.forEach(td => {
+          const field = td.getAttribute("data-field");
+          const original = st[field] ?? "";
+          td.classList.remove("pending");
+          td.innerHTML = "";
+          const wrap = renderMarkButtons_Class(st.sheet_row, field, original);
+          td.appendChild(wrap);
 
-        // 버튼 클릭 시 td pending 표시도 같이 갱신되도록 이벤트 후킹
-        wrap.querySelectorAll(".m").forEach(btn => {
-          btn.addEventListener("click", () => {
-            const col = COL_MAP[field];
-            const key = `${st.sheet_row}:${col}`;
-            setCellPendingByTd(td, state.pending.has(key));
+          wrap.querySelectorAll(".m").forEach(btn => {
+            btn.addEventListener("click", () => {
+              const col = COL_MAP[field];
+              const key = `${st.sheet_row}:${col}`;
+              setCellPendingByTd(td, state.pending.has(key));
+            });
           });
         });
       });
-    });
 
-    tableEl.style.display = "";
-    setStatus(`총 ${students.length}명`);
+      tableEl.style.display = "";
+      setStatus(`총 ${students.length}명`);
+    } catch (e) {
+      setStatus("학생 명단 로드 실패");
+    }
   }
 
-  // ✅ 직전보강: G~J는 읽기 전용 표시, K~M 입력 가능
   function renderReadonlyMark(val){
     const s = String(val || "").trim();
     return s ? escapeHtml(s) : "";
@@ -413,62 +439,111 @@
     tableEl.style.display = "none";
     tbodyEl.innerHTML = "";
 
-    const res = await fetch("/manage/api/recent");
-    const data = await res.json();
+    try {
+      const res = await fetch("/manage/api/recent");
+      const data = await res.json();
 
-    if(!data.ok){
+      if(!data.ok){
+        setStatus("직전보강 로드 실패");
+        return;
+      }
+
+      const students = data.students || [];
+      if(students.length === 0){
+        setStatus("데이터가 없습니다.");
+        return;
+      }
+
+      tbodyEl.innerHTML = students.map(st => `
+        <tr data-row="${st.sheet_row}" data-sheet="${st.sheet}">
+          <td class="col-grade">${escapeHtml(st.grade)}</td>
+          <td class="col-name">${escapeHtml(st.name)}</td>
+          <td class="col-school">${escapeHtml(st.school)}</td>
+          <td class="col-range">${escapeHtml(st.range)}</td>
+          <td class="col-period">${escapeHtml(st.period)}</td>
+          <td class="col-date">${escapeHtml(st.exam_date)}</td>
+
+          <td class="col-check">${renderReadonlyMark(st.otwo)}</td>
+          <td class="col-check">${renderReadonlyMark(st.essay)}</td>
+          <td class="col-check">${renderReadonlyMark(st.freq)}</td>
+          <td class="col-check">${renderReadonlyMark(st.freq_essay)}</td>
+
+          <td class="col-jb recent-only" data-jb="jb1"></td>
+          <td class="col-jb recent-only" data-jb="jb2"></td>
+          <td class="col-jb recent-only" data-jb="jb3"></td>
+        </tr>
+      `).join("");
+
+      students.forEach(st => {
+        const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"][data-sheet="${st.sheet}"]`);
+        const td1 = tr.querySelector(`td[data-jb="jb1"]`);
+        const td2 = tr.querySelector(`td[data-jb="jb2"]`);
+        const td3 = tr.querySelector(`td[data-jb="jb3"]`);
+
+        td1.innerHTML = "";
+        td2.innerHTML = "";
+        td3.innerHTML = "";
+
+        const cell1 = renderJBInput(st.sheet, st.sheet_row, "jb1", st.jb1);
+        const cell2 = renderJBInput(st.sheet, st.sheet_row, "jb2", st.jb2);
+        const cell3 = renderJBInput(st.sheet, st.sheet_row, "jb3", st.jb3);
+
+        td1.appendChild(cell1.firstChild);
+        td2.appendChild(cell2.firstChild);
+        td3.appendChild(cell3.firstChild);
+      });
+
+      tableEl.style.display = "";
+      setStatus(`총 ${students.length}명`);
+    } catch (e) {
       setStatus("직전보강 로드 실패");
-      return;
     }
+  }
 
-    const students = data.students || [];
-    if(students.length === 0){
-      setStatus("데이터가 없습니다.");
-      return;
+  async function refreshManageData(){
+    refreshBtn.disabled = true;
+
+    try {
+      setStatus("최신 데이터 불러오는 중...");
+
+      const body = {};
+      if (mode === "class" && state.grade) {
+        body.grade = state.grade;
+      }
+
+      const res = await fetch("/manage/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json();
+
+      if(!data.ok){
+        alert("업데이트 실패: " + (data.error || "unknown error"));
+        setStatus("데이터 업데이트 실패");
+        return;
+      }
+
+      if(mode === "recent"){
+        await loadRecent();
+      } else if(state.grade && state.className){
+        await selectGrade(state.grade);
+        await selectClass(state.className);
+      } else if(state.grade){
+        await selectGrade(state.grade);
+      } else {
+        setStatus("최신 데이터로 업데이트했습니다.");
+      }
+
+      alert("최신 데이터로 업데이트했습니다.");
+    } catch (e) {
+      console.error(e);
+      alert("서버 통신 오류");
+      setStatus("데이터 업데이트 중 오류 발생");
+    } finally {
+      refreshBtn.disabled = false;
     }
-
-    // 1차: 기본 row + G~J 읽기 전용 + K~M 자리(td는 DOM으로 붙임)
-    tbodyEl.innerHTML = students.map(st => `
-      <tr data-row="${st.sheet_row}" data-sheet="${st.sheet}">
-        <td class="col-grade">${escapeHtml(st.grade)}</td>
-        <td class="col-name">${escapeHtml(st.name)}</td>
-        <td class="col-school">${escapeHtml(st.school)}</td>
-        <td class="col-range">${escapeHtml(st.range)}</td>
-        <td class="col-period">${escapeHtml(st.period)}</td>
-        <td class="col-date">${escapeHtml(st.exam_date)}</td>
-
-        <td class="col-check">${renderReadonlyMark(st.otwo)}</td>
-        <td class="col-check">${renderReadonlyMark(st.essay)}</td>
-        <td class="col-check">${renderReadonlyMark(st.freq)}</td>
-        <td class="col-check">${renderReadonlyMark(st.freq_essay)}</td>
-
-        <td class="col-jb recent-only" data-jb="jb1"></td>
-        <td class="col-jb recent-only" data-jb="jb2"></td>
-        <td class="col-jb recent-only" data-jb="jb3"></td>
-      </tr>
-    `).join("");
-
-    // 2차: K~M 입력칸 DOM으로 삽입 + pending 처리
-    students.forEach(st => {
-      const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"][data-sheet="${st.sheet}"]`);
-      const td1 = tr.querySelector(`td[data-jb="jb1"]`);
-      const td2 = tr.querySelector(`td[data-jb="jb2"]`);
-      const td3 = tr.querySelector(`td[data-jb="jb3"]`);
-
-      td1.innerHTML = ""; td2.innerHTML = ""; td3.innerHTML = "";
-
-      const cell1 = renderJBInput(st.sheet, st.sheet_row, "jb1", st.jb1);
-      const cell2 = renderJBInput(st.sheet, st.sheet_row, "jb2", st.jb2);
-      const cell3 = renderJBInput(st.sheet, st.sheet_row, "jb3", st.jb3);
-
-      // 만들어진 td를 기존 td에 "내용만" 이식
-      td1.appendChild(cell1.firstChild);
-      td2.appendChild(cell2.firstChild);
-      td3.appendChild(cell3.firstChild);
-    });
-
-    tableEl.style.display = "";
-    setStatus(`총 ${students.length}명`);
   }
 
   applyBtn.onclick = async () => {
@@ -478,8 +553,8 @@
     setStatus(`적용 중... (${changes.length}건)`);
 
     const body = (mode === "recent")
-      ? { changes }                       // sheet 포함 (K~M)
-      : { grade: state.grade, changes };  // grade 기반 (G~J)
+      ? { changes }
+      : { grade: state.grade, changes };
 
     try{
       const res = await fetch("/manage/api/apply", {
@@ -496,7 +571,6 @@
 
       const applied = data.applied ?? 0;
 
-      // pending 초기화 + 하이라이트 제거
       state.pending.clear();
       updateApplyBtn();
       clearPendingUI();
@@ -509,17 +583,8 @@
   };
 
   recentBtn.onclick = loadRecent;
+  refreshBtn.onclick = refreshManageData;
 
-        // 필요하면 현재 보고 있는 학년/반 다시 불러오기
-        // 예:
-        // await loadClasses(currentGrade);
-        // await loadStudents(currentGrade, currentClass);
-    } catch (e) {
-        alert("서버 통신 오류");
-    }
-}
-</script>
-  // 초기 렌더
   renderGrades();
   updateApplyBtn();
 </script>
