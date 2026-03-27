@@ -509,27 +509,6 @@
   };
 
   recentBtn.onclick = loadRecent;
-<button onclick="refreshManageData()">데이터 업데이트</button>
-
-<script>
-async function refreshManageData(grade = "") {
-    try {
-        const res = await fetch("/manage/api/refresh", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ grade })
-        });
-
-        const data = await res.json();
-
-        if (!data.ok) {
-            alert("업데이트 실패: " + (data.error || "unknown error"));
-            return;
-        }
-
-        alert("최신 데이터로 업데이트했습니다.");
 
         // 필요하면 현재 보고 있는 학년/반 다시 불러오기
         // 예:
