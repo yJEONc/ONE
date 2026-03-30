@@ -12,7 +12,8 @@ body {
 
 .app-container {
     display: flex;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
 }
 
 /* ======================
@@ -20,90 +21,136 @@ body {
    ====================== */
 
 .sidebar {
-    width: 260px;
+    width: 360px;
     background: #020617;
     color: #e5e7eb;
-    padding: 24px 16px;
-
+    padding: 20px 16px;
     display: flex;
     flex-direction: column;
-    gap: 24px;
-
+    gap: 14px;
     height: 100vh;
+    min-height: 100vh;
+    flex: 0 0 360px;
     overflow: hidden;
+}
+
+.sidebar-top-fixed {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sidebar-bottom-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 .sidebar-section {
     display: flex;
     flex-direction: column;
-    margin-bottom: 8px;
 }
 
-.sidebar-section:first-child {
-    flex: 0 0 auto;
-}
-
-.sidebar-section:last-child {
-    flex: 1 1 auto;
-    min-height: 0;
+.sidebar-section.is-hidden {
+    display: none;
 }
 
 .sidebar-title {
     font-size: 14px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
     color: #9ca3af;
     margin-bottom: 8px;
+}
+
+.mode-switch,
+.grade-row,
+.class-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.mode-btn,
+.pill-btn {
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e5e7eb;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.mode-btn:hover,
+.pill-btn:hover {
+    background: #111827;
+    transform: translateY(-1px);
+}
+
+.mode-btn.active,
+.pill-btn.active {
+    background: #ffffff;
+    color: #111827;
+    border-color: #ffffff;
 }
 
 .sidebar-list {
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
 
-#schoolList {
-    flex: 1 1 auto;
-    overflow-y: auto;
-    min-height: 0;
-    padding-right: 6px;
-}
-
-#gradeList {
-    overflow: visible;
-}
-
-.sidebar-item {
+.sidebar-item-btn {
+    width: 100%;
+    display: block;
+    text-align: left;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #e5e7eb;
     padding: 10px 12px;
-    border-radius: 999px;
+    border-radius: 12px;
     cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    font: inherit;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.sidebar-item:hover {
+.sidebar-item-btn:hover {
     background: #111827;
-    transform: translateY(-1px);
+    border-color: #1f2937;
 }
 
-.sidebar-item.active {
-    background: #3b82f6;
-    color: #f9fafb;
+.sidebar-item-btn.active {
+    background: #ffffff;
+    color: #111827;
+    font-weight: 700;
 }
 
-/* end 시트에 이미 존재하는 학교 표시 */
-.sidebar-item.school-done {
+.sidebar-item-btn.school-done {
     color: #60a5fa;
     font-weight: 700;
 }
 
-.sidebar-item.active.school-done {
-    color: #f9fafb;
+.sidebar-item-btn.active.school-done {
+    color: #111827;
+}
+
+.sidebar-empty {
+    color: #94a3b8;
+    font-size: 14px;
+    padding: 8px 2px;
+    list-style: none;
+}
+
+.sidebar-empty-inline {
+    color: #94a3b8;
+    font-size: 14px;
+    padding: 4px 2px;
 }
 
 /* ======================
@@ -112,15 +159,18 @@ body {
 
 .main-content {
     flex: 1;
-    padding: 24px 32px;
+    padding: 24px 28px;
     display: flex;
     flex-direction: column;
     gap: 24px;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .main-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
 }
@@ -157,7 +207,7 @@ body {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 10px 15px -3px rgba(59,130,246,0.4);
+    box-shadow: 0 10px 15px -3px rgba(59,130,246,0.35);
     transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.1s ease;
 }
 
@@ -170,7 +220,6 @@ body {
 .primary-btn:not(:disabled):hover {
     background: #2563eb;
     transform: translateY(-1px);
-    box-shadow: 0 20px 25px -5px rgba(59,130,246,0.5);
 }
 
 .secondary-btn {
@@ -206,10 +255,6 @@ body {
     gap: 8px;
 }
 
-.save-loading.active {
-    display: flex;
-}
-
 .save-loading-track {
     width: 90px;
     height: 8px;
@@ -242,7 +287,7 @@ body {
 }
 
 /* ======================
-   단원 목록 카드
+   단원 목록
    ====================== */
 
 .units-section {
@@ -258,51 +303,70 @@ body {
 
 .section-title {
     font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 12px;
+    font-weight: 700;
+    margin-bottom: 14px;
 }
 
 .unit-list {
-    margin-top: 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
     overflow-y: auto;
+    min-height: 0;
 }
 
-.unit-item {
+.unit-row {
+    width: 100%;
+    border: 1px solid #dbe2ea;
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 14px 16px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: 12px;
+    gap: 14px;
+    text-align: left;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
-.unit-item:hover {
-    background: #f3f4f6;
+.unit-row:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
 }
 
-.unit-item input[type="checkbox"] {
-    cursor: pointer;
+.unit-row.selected {
+    border-color: #111827;
+    box-shadow: 0 0 0 2px rgba(17,24,39,0.08);
+    background: #f8fafc;
 }
 
-.unit-code {
+.unit-row-number {
+    min-width: 56px;
     font-size: 13px;
-    font-weight: 600;
-    color: #4b5563;
-    min-width: 40px;
+    font-weight: 700;
+    color: #6b7280;
 }
 
-.unit-name {
-    font-size: 14px;
+.unit-row-name {
+    font-size: 15px;
+    font-weight: 700;
     color: #111827;
+}
+
+.unit-empty {
+    font-size: 14px;
+    color: #6b7280;
 }
 
 /* ======================
    반응형
    ====================== */
+
+@media (max-width: 1100px) {
+    .sidebar {
+        width: 320px;
+    }
+}
 
 @media (max-width: 900px) {
     .app-container {
@@ -311,22 +375,12 @@ body {
 
     .sidebar {
         width: 100%;
-        flex-direction: row;
-        overflow-x: auto;
         height: auto;
-        overflow: auto;
+        max-height: none;
     }
 
-    .sidebar-section:last-child {
-        flex: 0 0 auto;
-        min-height: initial;
-    }
-
-    #schoolList {
+    .sidebar-bottom-scroll {
         overflow-y: visible;
-        flex: 0 0 auto;
-        min-height: initial;
-        padding-right: 0;
     }
 
     .main-header {
