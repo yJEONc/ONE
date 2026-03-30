@@ -54,7 +54,7 @@
     th.col-school,td.col-school  { width: 100px; }
     th.col-range, td.col-range   { width: 220px; }
     th.col-period,td.col-period  { width: 110px; }
-    th.col-date,  td.col-date    { width: 120px; }
+    th.col-date,  td.col-date    { width: 150px; }
 
     th.col-check, td.col-check { width: 120px; text-align:center; }
 
@@ -90,6 +90,7 @@
       display:flex;
       gap:6px;
       flex-wrap:wrap;
+      align-items:center;
     }
 
     .science-date-btn {
@@ -109,6 +110,30 @@
     .science-date-btn:disabled {
       opacity:.6;
       cursor:not-allowed;
+    }
+
+    .science-date-value {
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      background:#eef2ff;
+      border:1px solid #c7d2fe;
+      font-size:12px;
+      line-height:1.2;
+    }
+
+    .science-date-edit-btn {
+      padding:4px 8px;
+      border:1px solid #ccc;
+      border-radius:999px;
+      background:#fff;
+      cursor:pointer;
+      font-size:12px;
+      line-height:1.2;
+    }
+
+    .science-date-edit-btn:hover {
+      background:#f3f4f6;
     }
 
     .sidebar-bottom {
@@ -360,22 +385,51 @@
     return [d1, d2];
   }
 
-  function createScienceDateCell(st){
-    const td = document.createElement("td");
-    td.className = "col-date";
+  async function saveScienceDate(st, dateText, td, prevStatus){
+    td.dataset.saving = "1";
 
-    const examDate = String(st.exam_date || "").trim();
+    try {
+      const res = await fetch("/manage/api/save_science_day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grade: st.grade,
+          school: st.school,
+          value: dateText
+        })
+      });
 
-    if(examDate){
-      td.textContent = examDate;
-      return td;
+      const data = await res.json();
+
+      if(!data.ok){
+        alert("과학일 저장 실패: " + (data.error || "알 수 없는 오류"));
+        td.dataset.saving = "";
+        setStatus(prevStatus);
+        renderScienceDateDisplay(td, st);
+        return;
+      }
+
+      st.exam_date = dateText;
+      td.dataset.saving = "";
+      renderScienceDateDisplay(td, st);
+      setStatus(`과학일 저장 완료 (${st.school} / ${dateText})`);
+    } catch (e) {
+      console.error(e);
+      alert("과학일 저장 중 오류가 발생했습니다.");
+      td.dataset.saving = "";
+      setStatus(prevStatus);
+      renderScienceDateDisplay(td, st);
     }
+  }
+
+  function renderScienceDateEditor(td, st){
+    td.innerHTML = "";
 
     const options = parsePeriodDates(st.period);
 
     if(options.length === 0){
       td.textContent = "";
-      return td;
+      return;
     }
 
     const wrap = document.createElement("div");
@@ -390,51 +444,54 @@
       btn.onclick = async () => {
         if(td.dataset.saving === "1") return;
 
-        td.dataset.saving = "1";
-        const buttons = wrap.querySelectorAll("button");
-        buttons.forEach(b => b.disabled = true);
-
+        wrap.querySelectorAll("button").forEach(b => b.disabled = true);
         const prevStatus = statusEl.textContent;
         setStatus(`과학일 저장 중... (${st.school} / ${dateText})`);
-
-        try {
-          const res = await fetch("/manage/api/save_science_day", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              grade: st.grade,
-              school: st.school,
-              value: dateText
-            })
-          });
-
-          const data = await res.json();
-
-          if(!data.ok){
-            alert("과학일 저장 실패: " + (data.error || "알 수 없는 오류"));
-            buttons.forEach(b => b.disabled = false);
-            td.dataset.saving = "";
-            setStatus(prevStatus);
-            return;
-          }
-
-          td.textContent = dateText;
-          td.dataset.saving = "";
-          st.exam_date = dateText;
-          setStatus(`과학일 저장 완료 (${st.school} / ${dateText})`);
-        } catch (e) {
-          console.error(e);
-          alert("과학일 저장 중 오류가 발생했습니다.");
-          buttons.forEach(b => b.disabled = false);
-          td.dataset.saving = "";
-          setStatus(prevStatus);
-        }
+        await saveScienceDate(st, dateText, td, prevStatus);
       };
 
       wrap.appendChild(btn);
     });
 
     td.appendChild(wrap);
+  }
+
+  function renderScienceDateDisplay(td, st){
+    td.innerHTML = "";
+
+    const examDate = String(st.exam_date || "").trim();
+
+    if(!examDate){
+      renderScienceDateEditor(td, st);
+      return;
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "science-date-wrap";
+
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "science-date-value";
+    valueSpan.textContent = examDate;
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "science-date-edit-btn";
+    editBtn.textContent = "수정";
+
+    editBtn.onclick = () => {
+      if(td.dataset.saving === "1") return;
+      renderScienceDateEditor(td, st);
+    };
+
+    wrap.appendChild(valueSpan);
+    wrap.appendChild(editBtn);
+    td.appendChild(wrap);
+  }
+
+  function createScienceDateCell(st){
+    const td = document.createElement("td");
+    td.className = "col-date";
+    renderScienceDateDisplay(td, st);
     return td;
   }
 
