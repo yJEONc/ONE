@@ -54,7 +54,7 @@
     th.col-school,td.col-school  { width: 100px; }
     th.col-range, td.col-range   { width: 220px; }
     th.col-period,td.col-period  { width: 110px; }
-    th.col-date,  td.col-date    { width: 85px; }
+    th.col-date,  td.col-date    { width: 120px; }
 
     th.col-check, td.col-check { width: 120px; text-align:center; }
 
@@ -85,6 +85,31 @@
     .m.sel { border:2px solid #111; background:#e9f2ff; font-weight:700; transform:scale(1.05); }
 
     td.pending { background: #fff6cc; }
+
+    .science-date-wrap {
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+    }
+
+    .science-date-btn {
+      padding:4px 8px;
+      border:1px solid #ccc;
+      border-radius:999px;
+      background:#fff;
+      cursor:pointer;
+      font-size:12px;
+      line-height:1.2;
+    }
+
+    .science-date-btn:hover {
+      background:#f3f4f6;
+    }
+
+    .science-date-btn:disabled {
+      opacity:.6;
+      cursor:not-allowed;
+    }
 
     .sidebar-bottom {
       position:absolute;
@@ -314,6 +339,105 @@
     return wrap;
   }
 
+  function parsePeriodDates(period){
+    const text = String(period || "").trim();
+    const m = text.match(/^(\d{1,2})\/(\d{1,2})~(\d{1,2})\/(\d{1,2})$/);
+
+    if(!m) return [];
+
+    const startMonth = parseInt(m[1], 10);
+    const startDay = parseInt(m[2], 10);
+    const endMonth = parseInt(m[3], 10);
+    const endDay = parseInt(m[4], 10);
+
+    const d1 = `${startMonth}/${startDay}`;
+    const d2 = `${endMonth}/${endDay}`;
+
+    if (startMonth === endMonth && startDay === endDay) {
+      return [d1];
+    }
+
+    return [d1, d2];
+  }
+
+  function createScienceDateCell(st){
+    const td = document.createElement("td");
+    td.className = "col-date";
+
+    const examDate = String(st.exam_date || "").trim();
+
+    if(examDate){
+      td.textContent = examDate;
+      return td;
+    }
+
+    const options = parsePeriodDates(st.period);
+
+    if(options.length === 0){
+      td.textContent = "";
+      return td;
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "science-date-wrap";
+
+    options.forEach(dateText => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = dateText;
+      btn.className = "science-date-btn";
+
+      btn.onclick = async () => {
+        if(td.dataset.saving === "1") return;
+
+        td.dataset.saving = "1";
+        const buttons = wrap.querySelectorAll("button");
+        buttons.forEach(b => b.disabled = true);
+
+        const prevStatus = statusEl.textContent;
+        setStatus(`과학일 저장 중... (${st.school} / ${dateText})`);
+
+        try {
+          const res = await fetch("/manage/api/save_science_day", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              grade: st.grade,
+              school: st.school,
+              value: dateText
+            })
+          });
+
+          const data = await res.json();
+
+          if(!data.ok){
+            alert("과학일 저장 실패: " + (data.error || "알 수 없는 오류"));
+            buttons.forEach(b => b.disabled = false);
+            td.dataset.saving = "";
+            setStatus(prevStatus);
+            return;
+          }
+
+          td.textContent = dateText;
+          td.dataset.saving = "";
+          st.exam_date = dateText;
+          setStatus(`과학일 저장 완료 (${st.school} / ${dateText})`);
+        } catch (e) {
+          console.error(e);
+          alert("과학일 저장 중 오류가 발생했습니다.");
+          buttons.forEach(b => b.disabled = false);
+          td.dataset.saving = "";
+          setStatus(prevStatus);
+        }
+      };
+
+      wrap.appendChild(btn);
+    });
+
+    td.appendChild(wrap);
+    return td;
+  }
+
   async function selectClass(cn){
     setMode("class");
     state.className = cn;
@@ -351,7 +475,7 @@
           <td class="col-school">${escapeHtml(st.school)}</td>
           <td class="col-range">${escapeHtml(st.range)}</td>
           <td class="col-period">${escapeHtml(st.period)}</td>
-          <td class="col-date">${escapeHtml(st.exam_date)}</td>
+          <td class="col-date" data-science-date="1"></td>
 
           <td class="col-check class-only" data-field="otwo"></td>
           <td class="col-check class-only" data-field="essay"></td>
@@ -366,6 +490,11 @@
 
       students.forEach(st => {
         const tr = tbodyEl.querySelector(`tr[data-row="${st.sheet_row}"]`);
+
+        const scienceTd = tr.querySelector(`td[data-science-date="1"]`);
+        const newScienceTd = createScienceDateCell(st);
+        scienceTd.replaceWith(newScienceTd);
+
         const cells = tr.querySelectorAll(`td.col-check.class-only`);
         cells.forEach(td => {
           const field = td.getAttribute("data-field");
@@ -388,6 +517,7 @@
       tableEl.style.display = "";
       setStatus(`총 ${students.length}명`);
     } catch (e) {
+      console.error(e);
       setStatus("학생 명단 로드 실패");
     }
   }
@@ -496,6 +626,7 @@
       tableEl.style.display = "";
       setStatus(`총 ${students.length}명`);
     } catch (e) {
+      console.error(e);
       setStatus("직전보강 로드 실패");
     }
   }
