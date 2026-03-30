@@ -58,6 +58,9 @@ SHEET_SCHOOL = "class+"
 SHEET_END = "end"
 SHEET_UNITS = "units"
 
+# raw 일정 시트
+RAW_SCHEDULE_SHEET = "raw1학기일정"
+
 # -----------------------------
 # 공통 로그인
 # -----------------------------
@@ -345,6 +348,8 @@ def clear_manage_cache():
         for g in ("1", "2", "3"):
             MANAGE_CACHE[g] = None
             MANAGE_CACHE["loaded_at"][g] = None
+
+
 def get_manage_cache_status():
     with MANAGE_LOCK:
         return {
@@ -352,6 +357,81 @@ def get_manage_cache_status():
             "2": MANAGE_CACHE["loaded_at"].get("2"),
             "3": MANAGE_CACHE["loaded_at"].get("3"),
         }
+
+
+def get_current_exam_suffix(settings_ws):
+    """
+    settings!A1 값을 읽어서
+    1학기/2학기, 중간/기말 조합을 '1-1', '1-2', '2-1', '2-2' 로 변환
+    """
+    raw = (settings_ws.acell("A1").value or "").strip()
+
+    mapping = {
+        "1학기_중간_시험기간": "1-1",
+        "1학기_기말_시험기간": "1-2",
+        "2학기_중간_시험기간": "2-1",
+        "2학기_기말_시험기간": "2-2",
+    }
+
+    if raw not in mapping:
+        raise RuntimeError(
+            f"settings!A1 값이 올바르지 않습니다: {raw} "
+            f"(허용값: {', '.join(mapping.keys())})"
+        )
+
+    return mapping[raw], raw
+
+
+def save_science_day_to_raw_schedule(grade, school, science_day):
+    """
+    raw1학기일정 시트에서
+    - 행: school 열에서 학교명으로 찾고
+    - 열: settings!A1 + grade 조합으로 '2-1-1-과학일' 같은 헤더를 찾아
+    해당 셀에 science_day(예: 4/26)를 기록
+    """
+    sh = get_spreadsheet()
+
+    try:
+        raw_ws = sh.worksheet(RAW_SCHEDULE_SHEET)
+        settings_ws = sh.worksheet("settings")
+    except Exception as e:
+        raise RuntimeError(f"raw1학기일정/settings 시트를 찾을 수 없습니다: {e}")
+
+    exam_suffix, current_setting = get_current_exam_suffix(settings_ws)
+    target_header = f"{grade}-{exam_suffix}-과학일"
+
+    headers = raw_ws.row_values(1)
+    if not headers:
+        raise RuntimeError(f"{RAW_SCHEDULE_SHEET} 시트의 헤더 행이 비어 있습니다.")
+
+    school_col_idx = get_header_index(headers, "school") + 1
+    target_col_idx = get_header_index(headers, target_header) + 1
+
+    school_values = raw_ws.col_values(school_col_idx)
+
+    target_row = None
+    school = school.strip()
+
+    for row_idx, cell_value in enumerate(school_values[1:], start=2):
+        if (cell_value or "").strip() == school:
+            target_row = row_idx
+            break
+
+    if target_row is None:
+        raise RuntimeError(
+            f"{RAW_SCHEDULE_SHEET} 시트에서 학교 '{school}' 행을 찾을 수 없습니다."
+        )
+
+    raw_ws.update_cell(target_row, target_col_idx, science_day)
+
+    return {
+        "sheet": RAW_SCHEDULE_SHEET,
+        "row": target_row,
+        "header": target_header,
+        "value": science_day,
+        "currentSetting": current_setting,
+    }
+
 
 # =========================================================
 # 3) 내신자료 생성
@@ -868,7 +948,8 @@ def manage_api_refresh():
             "error": str(e),
             "trace": traceback.format_exc(),
         }), 500
-        
+
+
 @app.get("/manage/api/classes")
 def manage_api_classes():
     try:
@@ -1002,6 +1083,41 @@ def manage_api_recent():
         return jsonify({"ok": True, "students": all_students})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/manage/api/save_science_day")
+def manage_api_save_science_day():
+    try:
+        data = request.get_json(force=True) or {}
+
+        grade = str(data.get("grade") or "").strip()
+        school = str(data.get("school") or "").strip()
+        value = str(data.get("value") or "").strip()
+
+        if grade not in GRADE_SHEETS:
+            return jsonify({"ok": False, "error": "invalid grade"}), 400
+
+        if not school:
+            return jsonify({"ok": False, "error": "missing school"}), 400
+
+        if not re.fullmatch(r"\d{1,2}/\d{1,2}", value):
+            return jsonify({"ok": False, "error": "invalid science day format"}), 400
+
+        result = save_science_day_to_raw_schedule(grade, school, value)
+
+        clear_manage_cache()
+
+        return jsonify({
+            "ok": True,
+            **result,
+        })
+
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "trace": traceback.format_exc(),
+        }), 500
 
 
 @app.post("/manage/api/apply")
