@@ -2,30 +2,66 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>중학교 과학 단원 선택</title>
     <link rel="stylesheet" href="/survey-assets/style.css">
-<script src="/survey-assets/script.js"></script>
+    <style>
+        .unit-row.saved-unit {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.28);
+            background: #eff6ff;
+        }
+        .unit-row.saved-unit .unit-row-number,
+        .unit-row.saved-unit .unit-row-name {
+            color: #1d4ed8;
+            font-weight: 800;
+        }
+        .unit-row.saved-unit.selected {
+            border-color: #1d4ed8;
+            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.32);
+            background: #dbeafe;
+        }
+    </style>
 </head>
 <body>
 <div class="app-container">
-    <!-- 사이드바 -->
     <aside class="sidebar">
-        <div class="sidebar-section">
-            <h2 class="sidebar-title">학년</h2>
-            <ul id="gradeList" class="sidebar-list">
-                <!-- JS로 채움 -->
-            </ul>
+        <div class="sidebar-top-fixed">
+            <div class="sidebar-section">
+                <h2 class="sidebar-title">모드</h2>
+                <div class="mode-switch">
+                    <button id="modeLevelBtn" class="mode-btn active" type="button">level</button>
+                    <button id="modeClassBtn" class="mode-btn" type="button">class</button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h2 class="sidebar-title">학년</h2>
+                <div id="gradeRow" class="grade-row"></div>
+            </div>
+
+            <div id="levelSection" class="sidebar-section">
+                <h2 class="sidebar-title">학교</h2>
+            </div>
+
+            <div id="classSection" class="sidebar-section is-hidden">
+                <h2 class="sidebar-title">반명</h2>
+                <div id="classRow" class="class-row"></div>
+            </div>
         </div>
 
-        <div class="sidebar-section">
-            <h2 class="sidebar-title">학교</h2>
-            <ul id="schoolList" class="sidebar-list">
-                <!-- JS로 채움 -->
-            </ul>
+        <div class="sidebar-bottom-scroll">
+            <div id="levelListSection" class="sidebar-section">
+                <ul id="schoolList" class="sidebar-list"></ul>
+            </div>
+
+            <div id="classStudentSection" class="sidebar-section is-hidden">
+                <h2 class="sidebar-title">학교 + 이름</h2>
+                <ul id="classStudentList" class="sidebar-list"></ul>
+            </div>
         </div>
     </aside>
 
-    <!-- 메인 영역 -->
     <main class="main-content">
         <header class="main-header">
             <div>
@@ -37,10 +73,9 @@
 
             <div class="header-actions">
                 <button id="refreshEndBtn" class="secondary-btn" type="button">end 시트 업데이트</button>
-
                 <button id="saveBtn" class="primary-btn" disabled>선택 저장</button>
 
-                <div id="saveLoading" class="save-loading" aria-hidden="true">
+                <div id="saveLoading" class="save-loading" aria-hidden="true" style="display:none;">
                     <div class="save-loading-track">
                         <div class="save-loading-bar"></div>
                     </div>
@@ -51,13 +86,460 @@
 
         <section class="units-section">
             <h2 class="section-title">단원 목록</h2>
-            <div id="unitList" class="unit-list">
-                <!-- JS로 채움 -->
-            </div>
+            <div id="unitList" class="unit-list"></div>
         </section>
     </main>
 </div>
 
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+<script>
+(() => {
+    const state = {
+        mode: 'level',
+        grades: [],
+        unitsByGrade: {},
+        schoolsByGrade: {},
+        classesByGrade: {},
+        classStudentsByGrade: {},
+        selectedGrade: '',
+        selectedSchool: '',
+        selectedClass: '',
+        selectedStudentLabel: '',
+        selectedUnits: new Set(),
+        currentTermName: '-',
+        endCacheUpdatedAt: '-',
+        endSchoolMap: {},
+        savedUnitsByGradeSchool: {},
+    };
+
+    const el = {
+        modeLevelBtn: document.getElementById('modeLevelBtn'),
+        modeClassBtn: document.getElementById('modeClassBtn'),
+        gradeRow: document.getElementById('gradeRow'),
+        schoolList: document.getElementById('schoolList'),
+        classRow: document.getElementById('classRow'),
+        classStudentList: document.getElementById('classStudentList'),
+        levelSection: document.getElementById('levelSection'),
+        classSection: document.getElementById('classSection'),
+        levelListSection: document.getElementById('levelListSection'),
+        classStudentSection: document.getElementById('classStudentSection'),
+        unitList: document.getElementById('unitList'),
+        saveBtn: document.getElementById('saveBtn'),
+        refreshEndBtn: document.getElementById('refreshEndBtn'),
+        saveLoading: document.getElementById('saveLoading'),
+        currentTermDisplay: document.getElementById('currentTermDisplay'),
+        endCacheInfo: document.getElementById('endCacheInfo'),
+        selectionSummary: document.getElementById('selectionSummary'),
+    };
+
+    function escapeHtml(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function setMode(mode) {
+        state.mode = mode;
+        state.selectedSchool = '';
+        state.selectedClass = '';
+        state.selectedStudentLabel = '';
+        state.selectedUnits = new Set();
+
+        el.modeLevelBtn.classList.toggle('active', mode === 'level');
+        el.modeClassBtn.classList.toggle('active', mode === 'class');
+
+        el.levelSection.classList.toggle('is-hidden', mode !== 'level');
+        el.levelListSection.classList.toggle('is-hidden', mode !== 'level');
+
+        el.classSection.classList.toggle('is-hidden', mode !== 'class');
+        el.classStudentSection.classList.toggle('is-hidden', mode !== 'class');
+
+        renderSidebar();
+        renderUnits();
+        renderSummary();
+        updateSaveButton();
+    }
+
+    function getCurrentUnits() {
+        return state.unitsByGrade[state.selectedGrade] || [];
+    }
+
+    function getCurrentSchools() {
+        return state.schoolsByGrade[state.selectedGrade] || [];
+    }
+
+    function getCurrentClasses() {
+        return state.classesByGrade[state.selectedGrade] || [];
+    }
+
+    function getCurrentClassStudents() {
+        if (!state.selectedGrade || !state.selectedClass) return [];
+        return (state.classStudentsByGrade[state.selectedGrade] || {})[state.selectedClass] || [];
+    }
+
+    function hasTargetSelection() {
+        return !!state.selectedGrade && !!state.selectedSchool;
+    }
+
+    function getSavedUnitsFor(grade, school) {
+        if (!grade || !school) return [];
+        const byGrade = state.savedUnitsByGradeSchool[grade] || {};
+        return byGrade[school] || [];
+    }
+
+    function getSavedUnitKeySet(grade, school) {
+        const items = getSavedUnitsFor(grade, school);
+        return new Set(items.map(item => `${item.number}__${item.unit}`));
+    }
+
+    function applySavedUnitsForCurrentSchool() {
+        state.selectedUnits = getSavedUnitKeySet(state.selectedGrade, state.selectedSchool);
+    }
+
+    function renderGradeRow() {
+        const grades = state.grades || [];
+        if (!grades.length) {
+            el.gradeRow.innerHTML = '<p class="sidebar-empty-inline">학년이 없습니다.</p>';
+            return;
+        }
+
+        el.gradeRow.innerHTML = grades.map(grade => {
+            const active = state.selectedGrade === grade ? 'active' : '';
+            return `
+                <button type="button" class="pill-btn ${active}" data-grade="${escapeHtml(grade)}">
+                    ${escapeHtml(grade)}학년
+                </button>
+            `;
+        }).join('');
+
+        el.gradeRow.querySelectorAll('.pill-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const grade = btn.dataset.grade;
+                if (state.selectedGrade === grade) return;
+
+                state.selectedGrade = grade;
+                state.selectedSchool = '';
+                state.selectedClass = '';
+                state.selectedStudentLabel = '';
+                state.selectedUnits = new Set();
+
+                renderSidebar();
+                renderUnits();
+                renderSummary();
+                updateSaveButton();
+            });
+        });
+    }
+
+    function renderSchoolList() {
+        const schools = getCurrentSchools();
+        const highlightedSchools = new Set(state.endSchoolMap[state.selectedGrade] || []);
+
+        if (!schools.length) {
+            el.schoolList.innerHTML = '<li class="sidebar-empty">표시할 학교가 없습니다.</li>';
+            return;
+        }
+
+        el.schoolList.innerHTML = schools.map(school => {
+            const active = state.selectedSchool === school ? 'active' : '';
+            const done = highlightedSchools.has(school) ? 'school-done' : '';
+            const title = highlightedSchools.has(school) ? 'end 시트에 이미 등록된 학교입니다.' : '';
+            return `
+                <li>
+                    <button type="button" class="sidebar-item-btn ${active} ${done}" data-school="${escapeHtml(school)}" title="${escapeHtml(title)}">
+                        ${escapeHtml(school)}
+                    </button>
+                </li>
+            `;
+        }).join('');
+
+        el.schoolList.querySelectorAll('.sidebar-item-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.selectedSchool = btn.dataset.school;
+                applySavedUnitsForCurrentSchool();
+                renderSidebar();
+                renderUnits();
+                renderSummary();
+                updateSaveButton();
+            });
+        });
+    }
+
+    function renderClassRow() {
+        const classes = getCurrentClasses();
+        if (!classes.length) {
+            el.classRow.innerHTML = '<p class="sidebar-empty-inline">표시할 반이 없습니다.</p>';
+            return;
+        }
+
+        el.classRow.innerHTML = classes.map(className => {
+            const active = state.selectedClass === className ? 'active' : '';
+            return `
+                <button type="button" class="pill-btn ${active}" data-class="${escapeHtml(className)}">
+                    ${escapeHtml(className)}
+                </button>
+            `;
+        }).join('');
+
+        el.classRow.querySelectorAll('.pill-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const className = btn.dataset.class;
+                state.selectedClass = className;
+                state.selectedSchool = '';
+                state.selectedStudentLabel = '';
+                state.selectedUnits = new Set();
+                renderSidebar();
+                renderUnits();
+                renderSummary();
+                updateSaveButton();
+            });
+        });
+    }
+
+    function renderClassStudentList() {
+        const students = getCurrentClassStudents();
+        const highlightedSchools = new Set(state.endSchoolMap[state.selectedGrade] || []);
+
+        if (!students.length) {
+            el.classStudentList.innerHTML = '<li class="sidebar-empty">반을 선택하면 학교 + 이름 목록이 표시됩니다.</li>';
+            return;
+        }
+
+        el.classStudentList.innerHTML = students.map(item => {
+            const active = state.selectedStudentLabel === item.label ? 'active' : '';
+            const done = highlightedSchools.has(item.school) ? 'school-done' : '';
+            const title = highlightedSchools.has(item.school) ? '이 학교는 이미 조사되어 있습니다.' : '';
+            return `
+                <li>
+                    <button
+                        type="button"
+                        class="sidebar-item-btn ${active} ${done}"
+                        data-label="${escapeHtml(item.label)}"
+                        title="${escapeHtml(title)}"
+                    >
+                        ${escapeHtml(item.label)}
+                    </button>
+                </li>
+            `;
+        }).join('');
+
+        el.classStudentList.querySelectorAll('.sidebar-item-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const label = btn.dataset.label;
+                const found = getCurrentClassStudents().find(item => item.label === label);
+                state.selectedStudentLabel = label;
+                state.selectedSchool = found ? found.school : '';
+                applySavedUnitsForCurrentSchool();
+                renderSidebar();
+                renderUnits();
+                renderSummary();
+                updateSaveButton();
+            });
+        });
+    }
+
+    function renderSidebar() {
+        renderGradeRow();
+
+        if (state.mode === 'level') {
+            renderSchoolList();
+            el.classRow.innerHTML = '';
+            el.classStudentList.innerHTML = '';
+            return;
+        }
+
+        renderClassRow();
+        renderClassStudentList();
+    }
+
+    function renderUnits() {
+        const units = getCurrentUnits();
+
+        if (!units.length) {
+            el.unitList.innerHTML = '<p class="unit-empty">학년을 선택하면 단원이 표시됩니다.</p>';
+            return;
+        }
+
+        const savedUnitKeys = hasTargetSelection()
+            ? getSavedUnitKeySet(state.selectedGrade, state.selectedSchool)
+            : new Set();
+
+        el.unitList.innerHTML = units.map(item => {
+            const key = `${item.number}__${item.unit}`;
+            const selected = state.selectedUnits.has(key) ? 'selected' : '';
+            const saved = savedUnitKeys.has(key) ? 'saved-unit' : '';
+            return `
+                <button type="button" class="unit-row ${selected} ${saved}" data-key="${escapeHtml(key)}">
+                    <span class="unit-row-number">${escapeHtml(item.number)}</span>
+                    <span class="unit-row-name">${escapeHtml(item.unit)}</span>
+                </button>
+            `;
+        }).join('');
+
+        el.unitList.querySelectorAll('.unit-row').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!hasTargetSelection()) {
+                    alert(state.mode === 'level'
+                        ? '학년과 학교를 먼저 선택하세요.'
+                        : '학년, 반명, 학교 + 이름을 먼저 선택하세요.');
+                    return;
+                }
+
+                const key = btn.dataset.key;
+                if (state.selectedUnits.has(key)) {
+                    state.selectedUnits.delete(key);
+                } else {
+                    state.selectedUnits.add(key);
+                }
+
+                renderUnits();
+                updateSaveButton();
+            });
+        });
+    }
+
+    function renderSummary() {
+        el.currentTermDisplay.textContent = `현재 기준 : ${state.currentTermName || '-'}`;
+        el.endCacheInfo.textContent = `end 캐시 갱신 시각 : ${state.endCacheUpdatedAt || '-'}`;
+
+        if (!state.selectedGrade) {
+            el.selectionSummary.textContent = '학년을 선택하세요.';
+            return;
+        }
+
+        if (state.mode === 'level') {
+            if (!state.selectedSchool) {
+                el.selectionSummary.textContent = `${state.selectedGrade}학년에서 학교를 선택하세요.`;
+                return;
+            }
+            el.selectionSummary.textContent = `${state.selectedGrade}학년 / ${state.selectedSchool}`;
+            return;
+        }
+
+        if (!state.selectedClass) {
+            el.selectionSummary.textContent = `${state.selectedGrade}학년에서 반명을 선택하세요.`;
+            return;
+        }
+
+        if (!state.selectedStudentLabel || !state.selectedSchool) {
+            el.selectionSummary.textContent = `${state.selectedGrade}학년 / ${state.selectedClass} / 학교 + 이름을 선택하세요.`;
+            return;
+        }
+
+        el.selectionSummary.textContent =
+            `${state.selectedGrade}학년 / ${state.selectedClass} / ${state.selectedStudentLabel} → 저장 대상 학교: ${state.selectedSchool}`;
+    }
+
+    function updateSaveButton() {
+        el.saveBtn.disabled = !(hasTargetSelection() && state.selectedUnits.size > 0);
+    }
+
+    async function loadData() {
+        const res = await fetch('/survey/api/data');
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+            throw new Error(data.error || '데이터를 불러오지 못했습니다.');
+        }
+
+        state.grades = data.grades || [];
+        state.unitsByGrade = data.unitsByGrade || {};
+        state.currentTermName = data.currentTermName || '-';
+        state.endCacheUpdatedAt = data.endCacheUpdatedAt || '-';
+        state.endSchoolMap = data.endSchoolMap || {};
+        state.savedUnitsByGradeSchool = data.savedUnitsByGradeSchool || {};
+        state.classesByGrade = data.classesByGrade || {};
+        state.classStudentsByGrade = data.classStudentsByGrade || {};
+
+        const schoolsByGrade = data.schoolsByGrade || {};
+
+        state.schoolsByGrade = {};
+        state.grades.forEach(grade => {
+            state.schoolsByGrade[grade] = schoolsByGrade[grade] || [];
+        });
+
+        if (!state.selectedGrade && state.grades.length) {
+            state.selectedGrade = state.grades[0];
+        }
+
+        renderSidebar();
+        renderUnits();
+        renderSummary();
+        updateSaveButton();
+    }
+
+    async function saveSelection() {
+        const units = getCurrentUnits()
+            .filter(item => state.selectedUnits.has(`${item.number}__${item.unit}`))
+            .map(item => ({ number: item.number, unit: item.unit }));
+
+        if (!units.length || !hasTargetSelection()) return;
+
+        el.saveBtn.disabled = true;
+        el.saveLoading.style.display = 'flex';
+
+        try {
+            const res = await fetch('/survey/api/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grade: state.selectedGrade,
+                    school: state.selectedSchool,
+                    units,
+                }),
+            });
+
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || '저장에 실패했습니다.');
+            }
+
+            alert(`${data.saved}개 단원을 저장했습니다.`);
+            const savedPayload = units.map(item => ({ number: item.number, unit: item.unit }));
+            if (!state.savedUnitsByGradeSchool[state.selectedGrade]) {
+                state.savedUnitsByGradeSchool[state.selectedGrade] = {};
+            }
+            state.savedUnitsByGradeSchool[state.selectedGrade][state.selectedSchool] = savedPayload;
+            applySavedUnitsForCurrentSchool();
+            renderUnits();
+            updateSaveButton();
+        } catch (err) {
+            alert(err.message || '저장 중 오류가 발생했습니다.');
+            updateSaveButton();
+        } finally {
+            el.saveLoading.style.display = 'none';
+        }
+    }
+
+    async function refreshEndCache() {
+        el.refreshEndBtn.disabled = true;
+        try {
+            const res = await fetch('/survey/api/refresh_end_cache', { method: 'POST' });
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || 'end 시트 업데이트에 실패했습니다.');
+            }
+
+            await loadData();
+        } catch (err) {
+            alert(err.message || 'end 시트 업데이트 중 오류가 발생했습니다.');
+        } finally {
+            el.refreshEndBtn.disabled = false;
+        }
+    }
+
+    el.modeLevelBtn.addEventListener('click', () => setMode('level'));
+    el.modeClassBtn.addEventListener('click', () => setMode('class'));
+    el.saveBtn.addEventListener('click', saveSelection);
+    el.refreshEndBtn.addEventListener('click', refreshEndCache);
+
+    loadData().catch(err => {
+        alert(err.message || '초기 데이터를 불러오지 못했습니다.');
+    });
+})();
+</script>
 </body>
 </html>
