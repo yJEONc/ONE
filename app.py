@@ -240,6 +240,108 @@ def ensure_end_cache():
     return refresh_end_cache()
 
 
+def build_saved_units_map(records_rows, current_term_name):
+    """
+    records 시트에서 현재 기준(current_term_name)의 저장된 단원 목록을
+    grade -> school -> [{number, unit}, ...] 형태로 만든다.
+    """
+    saved_units_map = {}
+
+    if not records_rows:
+        return saved_units_map
+
+    start_idx = 0
+    if len(records_rows[0]) >= 6:
+        c1 = (records_rows[0][1] or "").strip().lower()
+        c2 = (records_rows[0][2] or "").strip().lower()
+        c3 = (records_rows[0][3] or "").strip().lower()
+        if c1 == "grade" or c2 == "school" or c3 == "number":
+            start_idx = 1
+
+    dedup = set()
+
+    for row in records_rows[start_idx:]:
+        grade = (row[1] if len(row) > 1 else "").strip()
+        school = (row[2] if len(row) > 2 else "").strip()
+        number = (row[3] if len(row) > 3 else "").strip()
+        unit = (row[4] if len(row) > 4 else "").strip()
+        term = (row[5] if len(row) > 5 else "").strip()
+
+        if not grade or not school or not number or not unit:
+            continue
+        if current_term_name and term and term != current_term_name:
+            continue
+
+        key = (grade, school, number, unit)
+        if key in dedup:
+            continue
+        dedup.add(key)
+
+        saved_units_map.setdefault(grade, {}).setdefault(school, []).append({
+            "number": number,
+            "unit": unit,
+        })
+
+    for grade, school_map in saved_units_map.items():
+        for school, items in school_map.items():
+            school_map[school] = sorted(items, key=lambda x: ((x.get("number") or ""), (x.get("unit") or "")))
+
+    return saved_units_map
+
+
+def get_survey_class_data():
+    """
+    M1/M2/M3 시트의 A:C(반명, 학생명, 학교)를 읽어
+    survey class 모드에서 사용할 반/학생 데이터를 만든다.
+    반명은 오름차순, 학생 목록은 학교명/학생명 순으로 정렬한다.
+    """
+    service = get_sheets_service(readonly=True)
+
+    classes_by_grade = {}
+    class_students_by_grade = {}
+
+    for grade, sheet_name in GRADE_SHEETS.items():
+        resp = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{sheet_name}!A2:C"
+        ).execute()
+        rows = resp.get("values", [])
+
+        seen_classes = set()
+        class_map = {}
+
+        for row in rows:
+            class_name = (row[0] if len(row) > 0 else "").strip()
+            student_name = (row[1] if len(row) > 1 else "").strip()
+            school_name = (row[2] if len(row) > 2 else "").strip()
+
+            if not class_name or not student_name or not school_name:
+                continue
+
+            seen_classes.add(class_name)
+
+            class_map.setdefault(class_name, []).append({
+                "label": f"{school_name} {student_name}",
+                "school": school_name,
+                "name": student_name,
+            })
+
+        sorted_classes = sorted(seen_classes)
+        sorted_class_map = {}
+        for class_name in sorted_classes:
+            students = class_map.get(class_name, [])
+            students = sorted(
+                students,
+                key=lambda x: ((x.get("school") or ""), (x.get("name") or ""))
+            )
+            sorted_class_map[class_name] = students
+
+        classes_by_grade[grade] = sorted_classes
+        class_students_by_grade[grade] = sorted_class_map
+
+    return classes_by_grade, class_students_by_grade
+
+
 # =========================================================
 # 2) 내신관리
 # =========================================================
@@ -783,10 +885,11 @@ def generate_assets(filename):
 @app.route("/survey/api/data")
 def survey_api_data():
     try:
-        units_ws, school_ws, _, settings_ws, _ = survey_get_sheets()
+        units_ws, school_ws, records_ws, settings_ws, _ = survey_get_sheets()
 
         units_rows = units_ws.get_all_values()
         school_rows = school_ws.get_all_values()
+        records_rows = records_ws.get_all_values()
 
         if not units_rows:
             raise RuntimeError("units 시트가 비어 있습니다.")
@@ -837,15 +940,36 @@ def survey_api_data():
 
         schools = sorted(school_set)
 
+        classes_by_grade, class_students_by_grade = get_survey_class_data()
+
+        grade_schools_map = {}
+        for grade, class_map in class_students_by_grade.items():
+            seen_school = set()
+            school_names = []
+            for students in class_map.values():
+                for student in students:
+                    school_name = (student.get("school") or "").strip()
+                    if school_name and school_name not in seen_school:
+                        seen_school.add(school_name)
+                        school_names.append(school_name)
+            grade_schools_map[grade] = sorted(school_names)
+
+        current_term_name = get_current_term_name(settings_ws)
+        saved_units_map = build_saved_units_map(records_rows, current_term_name)
+
         end_cache = ensure_end_cache()
 
         return jsonify({
             "ok": True,
             "grades": grades,
             "schools": schools,
+            "schoolsByGrade": grade_schools_map,
+            "classesByGrade": classes_by_grade,
+            "classStudentsByGrade": class_students_by_grade,
             "unitsByGrade": units_by_grade,
+            "savedUnitsByGradeSchool": saved_units_map,
             "currentSortHeader": get_current_sort_header(settings_ws),
-            "currentTermName": get_current_term_name(settings_ws),
+            "currentTermName": current_term_name,
             "endSchoolMap": end_cache["end_school_map"],
             "endCacheUpdatedAt": end_cache["updated_at"],
         })
