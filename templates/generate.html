@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VM MKIII</title>
-    <link rel="stylesheet" href="/generate-assets/style.css?v=4">
-<script src="/generate-assets/main.js?v=4"></script>
+    <link rel="stylesheet" href="/generate-assets/style.css?v=5">
 </head>
 <body>
 <div class="container">
@@ -16,24 +15,39 @@
             <li data-grade="3" class="grade-item">3학년</li>
         </ul>
 
+        <div class="sidebar-actions">
+            <button id="select-all-btn" type="button">전체 선택</button>
+            <button id="clear-all-btn" type="button">전체 해제</button>
+        </div>
+
         <h2>학교 선택</h2>
         <ul id="school-list"></ul>
     </div>
 
     <div class="main">
-        <div id="selected-info" class="selected-info">
-            학년과 학교를 선택해주세요.
+        <div class="top-tools">
+            <div id="selected-info" class="selected-info">학년과 학교를 선택해주세요.</div>
+            <button id="refresh-cache-btn" type="button">end시트 반영</button>
+            <button id="reset-status-btn" type="button">완료 상태 초기화</button>
         </div>
 
-        <!-- ✅ end시트 반영 버튼 -->
-        <button id="refresh-cache-btn" type="button">end시트 반영</button>
+        <div id="bulk-status" class="bulk-status"></div>
 
-        <div id="unit-columns" class="unit-columns">
-            <!-- 학교별 단원 카드가 여기 채워짐 -->
+        <div id="unit-columns" class="unit-columns"></div>
+
+        <div id="bulk-actions" class="bulk-actions hidden">
+            <div class="bulk-actions-title">일괄 다운로드</div>
+            <div class="bulk-actions-grid">
+                <button data-bulk-type="서술형" type="button">서술형 일괄</button>
+                <button data-bulk-type="최다빈출" type="button">최다빈출 일괄</button>
+                <button data-bulk-type="오투" type="button">오투 일괄</button>
+                <button data-bulk-type="Final" type="button">Final 일괄</button>
+            </div>
+            <div class="bulk-actions-help">일괄 다운로드는 순차적으로 진행됩니다.</div>
         </div>
     </div>
 </div>
 
-<script src="/static/main.js?v=4"></script>
+<script src="/generate-assets/main.js?v=5"></script>
 </body>
 </html>

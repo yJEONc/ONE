@@ -543,6 +543,8 @@ CACHE = {
     "end_rows": None,
     "units_rows": None,
     "school_list": None,
+    "grade_school_map": None,
+    "school_meta_by_grade": None,
     "loaded_at": None
 }
 
@@ -616,42 +618,86 @@ def refresh_generate_cache():
 
         current_key = school_sort_key(science_date, exam_period, school_name)
 
-        if school_name not in best_by_school:
+        if school_name not in best_by_school or current_key < best_by_school[school_name]["sort_key"]:
             best_by_school[school_name] = {
                 "school": school_name,
                 "science_date": science_date,
                 "exam_period": exam_period,
-                "sort_key": current_key
+                "sort_key": current_key,
             }
-        else:
-            if current_key < best_by_school[school_name]["sort_key"]:
-                best_by_school[school_name] = {
-                    "school": school_name,
-                    "science_date": science_date,
-                    "exam_period": exam_period,
-                    "sort_key": current_key
-                }
 
     school_list = [
         item["school"]
         for item in sorted(best_by_school.values(), key=lambda x: x["sort_key"])
     ]
 
+    grade_school_map = {"1": [], "2": [], "3": []}
+    school_meta_by_grade = {"1": {}, "2": {}, "3": {}}
+
+    for grade, sheet_name in GRADE_SHEETS.items():
+        grade_res = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{sheet_name}!C2:F"
+        ).execute()
+        grade_rows = grade_res.get("values", [])
+
+        best_for_grade = {}
+
+        for row in grade_rows:
+            school_name = row[0].strip() if len(row) > 0 and row[0] else ""
+            range_text = row[1].strip() if len(row) > 1 and row[1] else ""
+            exam_period = row[2].strip() if len(row) > 2 and row[2] else ""
+            science_date = row[3].strip() if len(row) > 3 and row[3] else ""
+
+            if not school_name:
+                continue
+
+            current_key = school_sort_key(science_date, exam_period, school_name)
+            fallback_meta = best_by_school.get(school_name, {})
+
+            candidate = {
+                "school": school_name,
+                "range": range_text,
+                "exam_period": exam_period or fallback_meta.get("exam_period", ""),
+                "science_date": science_date or fallback_meta.get("science_date", ""),
+                "sort_key": current_key,
+            }
+
+            if school_name not in best_for_grade or current_key < best_for_grade[school_name]["sort_key"]:
+                best_for_grade[school_name] = candidate
+
+        sorted_items = sorted(best_for_grade.values(), key=lambda x: x["sort_key"])
+        grade_school_map[grade] = [item["school"] for item in sorted_items]
+        school_meta_by_grade[grade] = {item["school"]: item for item in sorted_items}
+
     CACHE["end_rows"] = end_rows
     CACHE["units_rows"] = units_rows
     CACHE["school_list"] = school_list
+    CACHE["grade_school_map"] = grade_school_map
+    CACHE["school_meta_by_grade"] = school_meta_by_grade
     CACHE["loaded_at"] = time.time()
 
 
 def ensure_generate_cache():
     with CACHE_LOCK:
-        if CACHE["end_rows"] is None or CACHE["units_rows"] is None or CACHE["school_list"] is None:
+        if (
+            CACHE["end_rows"] is None
+            or CACHE["units_rows"] is None
+            or CACHE["school_list"] is None
+            or CACHE["grade_school_map"] is None
+            or CACHE["school_meta_by_grade"] is None
+        ):
             refresh_generate_cache()
 
 
 def read_school_list():
     ensure_generate_cache()
     return CACHE["school_list"]
+
+
+def read_grade_school_meta(grade):
+    ensure_generate_cache()
+    return (CACHE.get("school_meta_by_grade") or {}).get(str(grade), {})
 
 
 def read_units_codes(grade, school):
@@ -665,14 +711,21 @@ def read_units_codes(grade, school):
 
 def read_grade_schools(grade):
     ensure_generate_cache()
+    return (CACHE.get("grade_school_map") or {}).get(str(grade), [])
+
+
+def read_surveyed_grade_schools(grade):
+    ensure_generate_cache()
     rows = CACHE["end_rows"]
     seen = set()
     schools = []
     for r in rows:
-        if len(r) >= 3 and str(r[1]) == str(grade):
-            if r[2] not in seen:
-                seen.add(r[2])
-                schools.append(r[2])
+        if len(r) >= 4 and str(r[1]) == str(grade):
+            school_name = (r[2] or "").strip()
+            codes_text = (r[3] or "").strip()
+            if school_name and codes_text and school_name not in seen:
+                seen.add(school_name)
+                schools.append(school_name)
     return schools
 
 
@@ -1311,7 +1364,11 @@ def generate_api_schools():
 def generate_api_grade_schools():
     try:
         data = request.get_json(force=True) or {}
-        return jsonify(read_grade_schools(data["grade"]))
+        grade = str(data["grade"])
+        return jsonify({
+            "schools": read_grade_schools(grade),
+            "surveyedSchools": read_surveyed_grade_schools(grade),
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1345,6 +1402,7 @@ def generate_api_bundle_units():
 
         school_codes = {}
         all_codes = set()
+        school_meta = read_grade_school_meta(grade)
 
         for sch in schools:
             codes = read_units_codes(grade, sch)
@@ -1355,9 +1413,13 @@ def generate_api_bundle_units():
 
         out = {}
         for sch, codes in school_codes.items():
+            meta = school_meta.get(sch, {})
             out[sch] = {
                 "codes": codes,
-                "names": {c: name_map.get(c, "") for c in codes}
+                "names": {c: name_map.get(c, "") for c in codes},
+                "range": meta.get("range", ""),
+                "exam_period": meta.get("exam_period", ""),
+                "science_date": meta.get("science_date", ""),
             }
 
         return jsonify(out)

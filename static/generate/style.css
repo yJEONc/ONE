@@ -3,7 +3,7 @@ body{
   font-family:sans-serif;
   background:#111827;
   color:#e5e7eb;
-  overflow:hidden; /* ✅ 페이지(전체) 스크롤 제거 */
+  overflow:hidden;
 }
 
 .container{
@@ -11,34 +11,32 @@ body{
   height:100vh;
 }
 
-/* ✅ 사이드바: 학년(고정) + 학교목록(스크롤) */
 .sidebar{
-  width:260px;
+  width:280px;
   background:#020617;
   padding:20px;
-  overflow:hidden;            /* ✅ sidebar 자체는 스크롤 X */
-  display:flex;               /* ✅ 위/아래 분리 */
+  overflow:hidden;
+  display:flex;
   flex-direction:column;
   height:100vh;
   box-sizing:border-box;
 }
 
 .sidebar h2{
-  margin-bottom:10px;
+  margin:0 0 10px;
   font-size:18px;
 }
 
 .sidebar ul{
   list-style:none;
   padding-left:0;
-  margin-bottom:20px;
+  margin:0 0 20px;
 }
 
-/* ✅ 학교 목록만 스크롤 */
 #school-list{
-  flex:1 1 auto;              /* ✅ 남은 공간 전부 */
-  min-height:0;               /* ✅ 스크롤 핵심 */
-  overflow-y:auto;            /* ✅ 학교 목록만 스크롤 */
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
 }
 
 .sidebar li{
@@ -55,12 +53,11 @@ body{
   background:#1f2937;
 }
 
-.sidebar li.disabled{
-  opacity:0.5;
+.sidebar li.empty-item{
   cursor:default;
+  color:#94a3b8;
 }
 
-/* 학년 버튼 */
 #grade-list{
   display:flex;
   gap:8px;
@@ -77,34 +74,100 @@ body{
   color:#fff;
 }
 
-/* 학교 색상 규칙 */
-.school-item.has-end{color:#60a5fa;} /* end 시트에 있는 학교(학년기준) - 파랑 텍스트 */
-.school-item.selected{background:#22c55e;color:#022c22;} /* 사용자가 선택한 학교 - 녹색 */
+.sidebar-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin:0 0 16px;
+}
 
-/* ✅ 메인 영역: 오른쪽만 독립 스크롤 */
+.sidebar-actions button,
+#refresh-cache-btn,
+.bulk-actions-grid button,
+.school-card-footer button,
+.remove-card-btn{
+  border:none;
+  cursor:pointer;
+}
+
+.sidebar-actions button{
+  padding:9px 10px;
+  border-radius:8px;
+  background:#1e293b;
+  color:#e5e7eb;
+}
+
+.sidebar-actions button:hover{
+  background:#334155;
+}
+
+.school-item.has-end{
+  color:#60a5fa;
+}
+
+.school-item.selected{
+  background:#22c55e;
+  color:#022c22;
+}
+
+.school-item.selected.has-end{
+  color:#022c22;
+}
+
 .main{
   flex:1;
   padding:24px;
   background:#020617;
   position:relative;
-  overflow:auto;   /* ✅ 메인 스크롤 */
-  min-height:0;    /* ✅ flex에서 스크롤 안정화 */
+  overflow:auto;
+  min-height:0;
   box-sizing:border-box;
 }
 
-.selected-info{
+.top-tools{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
   margin-bottom:16px;
+}
+
+.selected-info{
   font-size:16px;
   font-weight:600;
 }
 
+#refresh-cache-btn{
+  padding:10px 14px;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+}
+
+#refresh-cache-btn:hover{
+  background:#1d4ed8;
+}
+
+.bulk-status{
+  display:none;
+  margin-bottom:16px;
+  padding:12px 14px;
+  border-radius:10px;
+  background:#0f172a;
+  border:1px solid #1f2937;
+  color:#cbd5e1;
+}
+
+.bulk-status.visible{
+  display:block;
+}
+
 .unit-columns{
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr)); /* 2열 고정 */
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:16px;
 }
 
-/* 학교 카드 */
 .school-card{
   border:1px solid #1f2937;
   border-radius:12px;
@@ -112,13 +175,40 @@ body{
   background:#0b1120;
   display:flex;
   flex-direction:column;
-  min-height:160px;
+  min-height:240px;
 }
 
 .school-card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px;
+}
+
+.school-card-title{
+  font-size:18px;
+  font-weight:700;
+}
+
+.school-card-meta{
+  margin-top:4px;
+  color:#94a3b8;
+  font-size:13px;
+}
+
+.remove-card-btn{
+  width:32px;
+  height:32px;
+  border-radius:999px;
+  background:#1f2937;
+  color:#e5e7eb;
   font-size:16px;
-  font-weight:600;
-  margin-bottom:8px;
+  flex:0 0 auto;
+}
+
+.remove-card-btn:hover{
+  background:#334155;
 }
 
 .school-card-body{
@@ -126,64 +216,137 @@ body{
   font-size:14px;
 }
 
-.school-card-body ul{
+.range-box{
+  margin-bottom:12px;
+  padding:10px 12px;
+  border-radius:10px;
+  background:#111827;
+  border:1px solid #1f2937;
+}
+
+.range-label{
+  font-size:12px;
+  color:#94a3b8;
+  margin-bottom:4px;
+}
+
+.range-text{
+  color:#e5e7eb;
+  line-height:1.45;
+}
+
+.unit-code-list{
   padding-left:18px;
   margin:0;
 }
 
-.school-card-body li{
+.unit-code-list li{
   margin-bottom:4px;
 }
 
-.school-card-footer{
-  margin-top:12px;
+.units-empty{
+  color:#94a3b8;
 }
 
-.school-card-footer button{
-  margin-right:8px;
-  padding:8px 12px;
-  border-radius:8px;
-  border:none;
-  cursor:pointer;
-  background:#2563eb;
-  color:#fff;
-  font-size:13px;
-}
-
-.school-card-footer button:hover{
-  background:#1d4ed8;
-}
-
-/* Progress bar */
-.progress-bar{
+.status-row{
   display:flex;
-  gap:4px;
-  margin-top:10px;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:12px 0;
 }
 
-.progress-cell{
-  width:10px;
-  height:10px;
+.status-chip{
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:999px;
   background:#1f2937;
-  border-radius:2px;
-  transition:background 0.15s;
+  color:#cbd5e1;
 }
 
-.progress-cell.filled{
-  background:#60a5fa;
-}
+.status-chip.done{ background:#14532d; color:#dcfce7; }
+.status-chip.downloading{ background:#1d4ed8; color:#dbeafe; }
+.status-chip.queued{ background:#3f3f46; color:#f4f4f5; }
+.status-chip.error{ background:#7f1d1d; color:#fee2e2; }
 
-.progress-cell.done{
-  background:#22c55e;
+.school-card-footer{
+  margin-top:auto;
 }
 
 .button-grid{
   display:grid;
   grid-template-columns:repeat(2, 1fr);
   gap:8px;
-  margin-bottom:12px;
 }
 
 .button-grid button{
   width:100%;
+  padding:9px 10px;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+  font-size:13px;
+}
+
+.button-grid button:hover{
+  background:#1d4ed8;
+}
+
+.bulk-actions{
+  margin-top:20px;
+  padding:18px;
+  border:1px solid #1f2937;
+  border-radius:12px;
+  background:#0b1120;
+}
+
+.bulk-actions.hidden{
+  display:none;
+}
+
+.bulk-actions-title{
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:12px;
+}
+
+.bulk-actions-grid{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0, 1fr));
+  gap:10px;
+}
+
+.bulk-actions-grid button{
+  padding:12px 10px;
+  border-radius:10px;
+  background:#22c55e;
+  color:#052e16;
+  font-weight:700;
+}
+
+.bulk-actions-grid button:hover{
+  background:#16a34a;
+}
+
+.bulk-actions-grid button:disabled{
+  opacity:0.6;
+  cursor:not-allowed;
+}
+
+.bulk-actions-help{
+  margin-top:10px;
+  color:#94a3b8;
+  font-size:13px;
+}
+
+@media (max-width: 1200px){
+  .unit-columns{ grid-template-columns:1fr; }
+  .bulk-actions-grid{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px){
+  .container{ flex-direction:column; height:auto; }
+  .sidebar{ width:100%; height:auto; }
+  .main{ overflow:visible; }
+  .top-tools{ flex-direction:column; align-items:flex-start; }
+  .bulk-actions-grid{ grid-template-columns:1fr; }
 }
