@@ -23,6 +23,7 @@ import time
 import traceback
 import threading
 import datetime
+import gc
 from threading import Lock
 
 
@@ -540,8 +541,9 @@ def save_science_day_to_raw_schedule(grade, school, science_day):
 # =========================================================
 CACHE_LOCK = Lock()
 CACHE = {
-    "end_rows": None,
-    "units_rows": None,
+    "unit_codes_by_grade_school": None,
+    "surveyed_school_set_by_grade": None,
+    "unit_name_map_by_grade": None,
     "school_list": None,
     "grade_school_map": None,
     "school_meta_by_grade": None,
@@ -607,6 +609,34 @@ def refresh_generate_cache():
     school_rows = school_res.get("values", [])
 
     best_by_school = {}
+    unit_codes_by_grade_school = {"1": {}, "2": {}, "3": {}}
+    surveyed_school_set_by_grade = {"1": set(), "2": set(), "3": set()}
+    unit_name_map_by_grade = {"1": {}, "2": {}, "3": {}}
+
+    for row in end_rows:
+        grade = row[1].strip() if len(row) > 1 and row[1] else ""
+        school_name = row[2].strip() if len(row) > 2 and row[2] else ""
+        codes_text = row[3].strip() if len(row) > 3 and row[3] else ""
+
+        if grade not in GRADE_SHEETS or not school_name:
+            continue
+
+        codes = [u.strip() for u in codes_text.split(",") if u.strip()]
+        if codes:
+            unit_codes_by_grade_school[grade][school_name] = codes
+            surveyed_school_set_by_grade[grade].add(school_name)
+        else:
+            unit_codes_by_grade_school[grade].setdefault(school_name, [])
+
+    for row in units_rows:
+        grade = row[0].strip() if len(row) > 0 and row[0] else ""
+        code = row[1].strip() if len(row) > 1 and row[1] else ""
+        unit_name = row[2].strip() if len(row) > 2 and row[2] else ""
+
+        if grade not in GRADE_SHEETS or not code:
+            continue
+
+        unit_name_map_by_grade[grade][code] = unit_name
 
     for row in school_rows:
         school_name = row[0].strip() if len(row) > 0 and row[0] else ""
@@ -652,14 +682,16 @@ def refresh_generate_cache():
             if not school_name:
                 continue
 
-            current_key = school_sort_key(science_date, exam_period, school_name)
             fallback_meta = best_by_school.get(school_name, {})
+            effective_exam_period = exam_period or fallback_meta.get("exam_period", "")
+            effective_science_date = science_date or fallback_meta.get("science_date", "")
+            current_key = school_sort_key(effective_science_date, effective_exam_period, school_name)
 
             candidate = {
                 "school": school_name,
                 "range": range_text,
-                "exam_period": exam_period or fallback_meta.get("exam_period", ""),
-                "science_date": science_date or fallback_meta.get("science_date", ""),
+                "exam_period": effective_exam_period,
+                "science_date": effective_science_date,
                 "sort_key": current_key,
             }
 
@@ -670,19 +702,30 @@ def refresh_generate_cache():
         grade_school_map[grade] = [item["school"] for item in sorted_items]
         school_meta_by_grade[grade] = {item["school"]: item for item in sorted_items}
 
-    CACHE["end_rows"] = end_rows
-    CACHE["units_rows"] = units_rows
-    CACHE["school_list"] = school_list
-    CACHE["grade_school_map"] = grade_school_map
-    CACHE["school_meta_by_grade"] = school_meta_by_grade
-    CACHE["loaded_at"] = time.time()
+    CACHE.clear()
+    CACHE.update({
+        "unit_codes_by_grade_school": unit_codes_by_grade_school,
+        "surveyed_school_set_by_grade": {
+            grade: sorted(list(schools))
+            for grade, schools in surveyed_school_set_by_grade.items()
+        },
+        "unit_name_map_by_grade": unit_name_map_by_grade,
+        "school_list": school_list,
+        "grade_school_map": grade_school_map,
+        "school_meta_by_grade": school_meta_by_grade,
+        "loaded_at": time.time(),
+    })
+
+    del end_rows, units_rows, school_rows, best_by_school
+    gc.collect()
 
 
 def ensure_generate_cache():
     with CACHE_LOCK:
         if (
-            CACHE["end_rows"] is None
-            or CACHE["units_rows"] is None
+            CACHE["unit_codes_by_grade_school"] is None
+            or CACHE["surveyed_school_set_by_grade"] is None
+            or CACHE["unit_name_map_by_grade"] is None
             or CACHE["school_list"] is None
             or CACHE["grade_school_map"] is None
             or CACHE["school_meta_by_grade"] is None
@@ -702,11 +745,7 @@ def read_grade_school_meta(grade):
 
 def read_units_codes(grade, school):
     ensure_generate_cache()
-    rows = CACHE["end_rows"]
-    for r in rows:
-        if len(r) >= 4 and str(r[1]) == str(grade) and r[2] == school:
-            return [u.strip() for u in r[3].split(",") if u.strip()]
-    return []
+    return ((CACHE.get("unit_codes_by_grade_school") or {}).get(str(grade), {}) or {}).get(school, [])
 
 
 def read_grade_schools(grade):
@@ -716,30 +755,15 @@ def read_grade_schools(grade):
 
 def read_surveyed_grade_schools(grade):
     ensure_generate_cache()
-    rows = CACHE["end_rows"]
-    seen = set()
-    schools = []
-    for r in rows:
-        if len(r) >= 4 and str(r[1]) == str(grade):
-            school_name = (r[2] or "").strip()
-            codes_text = (r[3] or "").strip()
-            if school_name and codes_text and school_name not in seen:
-                seen.add(school_name)
-                schools.append(school_name)
-    return schools
+    return (CACHE.get("surveyed_school_set_by_grade") or {}).get(str(grade), [])
 
 
 def get_unit_name_map(grade, codes):
     if not codes:
         return {}
     ensure_generate_cache()
-    rows = CACHE["units_rows"]
-    codes_set = set(codes)
-    mapping = {}
-    for r in rows:
-        if len(r) >= 3 and str(r[0]) == str(grade) and r[1] in codes_set:
-            mapping[r[1]] = r[2]
-    return mapping
+    full_map = (CACHE.get("unit_name_map_by_grade") or {}).get(str(grade), {})
+    return {code: full_map.get(code, "") for code in codes}
 
 
 def find_pdfs(material_type, grade, unit_code):
@@ -1435,7 +1459,7 @@ def generate_api_refresh_cache():
             loaded_at = CACHE["loaded_at"]
         return jsonify({"ok": True, "loaded_at": loaded_at})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
 
 
 @app.route("/generate/api/merge_all", methods=["POST"])
