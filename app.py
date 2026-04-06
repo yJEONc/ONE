@@ -13,6 +13,10 @@ from flask_caching import Cache
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from PyPDF2 import PdfMerger
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen import canvas
 import gspread
 
 import os
@@ -778,6 +782,60 @@ def find_pdfs(material_type, grade, unit_code):
     ]
 
 
+
+
+def get_cover_title(material_type, grade, school):
+    grade_text = f"{grade}학년"
+
+    mapping = {
+        "서술형": f"{school}_{grade_text}_1주차 A",
+        "최다빈출": f"{school}_{grade_text}_1주차 B",
+        "오투": f"{school}_{grade_text}_2주차 A",
+        "FINAL": f"{school}_{grade_text}_2주차 B",
+    }
+
+    title = mapping.get(material_type)
+    if not title:
+        raise RuntimeError(f"지원하지 않는 표지 타입입니다: {material_type}")
+    return title
+
+
+def create_cover_pdf_bytes(title):
+    """
+    흰 배경의 1페이지 표지를 메모리에서 생성한다.
+    한글은 ReportLab의 CID 폰트(HYGothic-Medium)를 사용한다.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    font_name = "HYGothic-Medium"
+    try:
+        pdfmetrics.getFont(font_name)
+    except KeyError:
+        pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+
+    font_size = 24
+    c.setFont(font_name, font_size)
+
+    max_width = width - 80
+    while font_size > 12 and pdfmetrics.stringWidth(title, font_name, font_size) > max_width:
+        font_size -= 1
+
+    c.setFont(font_name, font_size)
+    c.drawCentredString(width / 2, height / 2, title)
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def append_cover_page(merger, material_type, grade, school):
+    cover_title = get_cover_title(material_type, grade, school)
+    cover_buf = create_cover_pdf_bytes(cover_title)
+    merger.append(cover_buf)
+    return cover_buf
+
 # =========================================================
 # 공통 페이지
 # =========================================================
@@ -1464,13 +1522,20 @@ def generate_api_refresh_cache():
 
 @app.route("/generate/api/merge_all", methods=["POST"])
 def generate_api_merge_all():
+    merger = None
+    cover_buf = None
     try:
         d = request.get_json(force=True) or {}
+        grade = str(d["grade"])
+        school = str(d["school"])
+        material_type = str(d["type"])
+
         merger = PdfMerger()
+        cover_buf = append_cover_page(merger, material_type, grade, school)
         count = 0
 
-        for unit in read_units_codes(d["grade"], d["school"]):
-            for p in find_pdfs(d["type"], d["grade"], unit):
+        for unit in read_units_codes(grade, school):
+            for p in find_pdfs(material_type, grade, unit):
                 merger.append(p)
                 count += 1
 
@@ -1483,19 +1548,33 @@ def generate_api_merge_all():
         return send_file(
             buf,
             as_attachment=True,
-            download_name=f'{d["grade"]}학년_{d["school"]}_{d["type"]}_전체.pdf',
+            download_name=f'{grade}학년_{school}_{material_type}_전체.pdf',
             mimetype="application/pdf"
         )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            if merger is not None:
+                merger.close()
+        except Exception:
+            pass
+        try:
+            if cover_buf is not None:
+                cover_buf.close()
+        except Exception:
+            pass
 
 
 @app.route("/generate/api/merge_final", methods=["POST"])
 def generate_api_merge_final():
+    merger = None
+    cover_buf = None
     try:
         d = request.get_json(force=True) or {}
         grade = str(d["grade"])
-        units = read_units_codes(grade, d["school"])
+        school = str(d["school"])
+        units = read_units_codes(grade, school)
         nums = sorted({int(u.split("-")[0]) for u in units if "-" in u})
 
         folder = f"data/Final모의고사/{grade}학년"
@@ -1503,6 +1582,7 @@ def generate_api_merge_final():
             return jsonify({"error": "folder_not_found", "folder": folder}), 404
 
         merger = PdfMerger()
+        cover_buf = append_cover_page(merger, "FINAL", grade, school)
         appended = 0
 
         for n in nums:
@@ -1524,19 +1604,33 @@ def generate_api_merge_final():
         return send_file(
             buf,
             as_attachment=True,
-            download_name=f'{grade}학년_{d["school"]}_FINAL모의고사.pdf',
+            download_name=f'{grade}학년_{school}_FINAL모의고사.pdf',
             mimetype="application/pdf"
         )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            if merger is not None:
+                merger.close()
+        except Exception:
+            pass
+        try:
+            if cover_buf is not None:
+                cover_buf.close()
+        except Exception:
+            pass
 
 
 @app.route("/generate/api/merge_otoo", methods=["POST"])
 def generate_api_merge_otoo():
+    merger = None
+    cover_buf = None
     try:
         d = request.get_json(force=True) or {}
         grade = str(d["grade"])
-        units = read_units_codes(grade, d["school"])
+        school = str(d["school"])
+        units = read_units_codes(grade, school)
         nums = sorted({int(u.split("-")[0]) for u in units if "-" in u})
 
         folder = f"data/오투모의고사/{grade}학년"
@@ -1544,6 +1638,7 @@ def generate_api_merge_otoo():
             return jsonify({"error": "folder_not_found", "folder": folder}), 404
 
         merger = PdfMerger()
+        cover_buf = append_cover_page(merger, "오투", grade, school)
         appended = 0
 
         for n in nums:
@@ -1565,11 +1660,22 @@ def generate_api_merge_otoo():
         return send_file(
             buf,
             as_attachment=True,
-            download_name=f'{grade}학년_{d["school"]}_오투모의고사.pdf',
+            download_name=f'{grade}학년_{school}_오투모의고사.pdf',
             mimetype="application/pdf"
         )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            if merger is not None:
+                merger.close()
+        except Exception:
+            pass
+        try:
+            if cover_buf is not None:
+                cover_buf.close()
+        except Exception:
+            pass
 
 
 # =========================================================
