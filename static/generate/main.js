@@ -5,6 +5,8 @@ let selectedSchools = new Set();
 let renderToken = 0;
 let isBulkDownloading = false;
 let bundleAbortController = null;
+let schoolGroups = {};
+let currentGroupRule = null;
 
 const STATUS_STORAGE_KEY = "vm_generate_download_status_v1";
 const MATERIAL_KEYS = ["서술형", "최다빈출", "오투", "Final"];
@@ -20,6 +22,7 @@ window.onload = function () {
     renderSchoolList();
     updateSelectedInfo();
     updateBulkActions();
+    renderGroupRuleInfo();
 };
 
 function loadDownloadStatus() {
@@ -106,6 +109,38 @@ function canMutateSelection() {
     return false;
 }
 
+function getSchoolGroupInfo(schoolName) {
+    return (schoolGroups && schoolGroups[schoolName]) ? schoolGroups[schoolName] : {};
+}
+
+function getSchoolGroupCode(schoolName) {
+    const info = getSchoolGroupInfo(schoolName);
+    return String(info.code || "").trim().toUpperCase();
+}
+
+function getSchoolGroupSuffix(schoolName) {
+    const code = getSchoolGroupCode(schoolName);
+    return code ? ` [${code}]` : "";
+}
+
+function renderGroupRuleInfo() {
+    const el = document.getElementById("group-rule-info");
+    if (!el) return;
+
+    if (!currentGroupRule || !currentGroupRule.cutoffText) {
+        el.textContent = "";
+        el.classList.remove("visible");
+        return;
+    }
+
+    const boundary = currentGroupRule.direction === "부터"
+        ? `${currentGroupRule.primaryLabel} = ${currentGroupRule.cutoffText}부터`
+        : `${currentGroupRule.primaryLabel} = ${currentGroupRule.cutoffText}까지`;
+
+    el.textContent = `현재 그룹 기준: ${boundary} / 그 외 ${currentGroupRule.secondaryLabel}`;
+    el.classList.add("visible");
+}
+
 function bindGradeClicks() {
     document.querySelectorAll("[data-grade]").forEach(li => {
         li.onclick = async () => {
@@ -131,6 +166,9 @@ async function loadGradeSchools() {
     if (!grade) {
         gradeSchools = [];
         surveyedSchools = [];
+        schoolGroups = {};
+        currentGroupRule = null;
+        renderGroupRuleInfo();
         return;
     }
 
@@ -143,10 +181,15 @@ async function loadGradeSchools() {
     const data = await res.json();
     gradeSchools = Array.isArray(data?.schools) ? data.schools : [];
     surveyedSchools = Array.isArray(data?.surveyedSchools) ? data.surveyedSchools : [];
+    schoolGroups = data?.schoolGroups || {};
+    currentGroupRule = data?.currentGroupRule || null;
+    renderGroupRuleInfo();
 }
 
 function bindSelectionButtons() {
     const selectAllBtn = document.getElementById("select-all-btn");
+    const selectABtn = document.getElementById("select-a-btn");
+    const selectBBtn = document.getElementById("select-b-btn");
     const clearAllBtn = document.getElementById("clear-all-btn");
 
     if (selectAllBtn) {
@@ -156,7 +199,48 @@ function bindSelectionButtons() {
                 alert("먼저 학년을 선택하세요.");
                 return;
             }
+            selectedSchools.clear();
             gradeSchools.forEach(s => selectedSchools.add(s));
+            updateSelectedInfo();
+            updateSchoolStyles();
+            await renderUnits();
+            updateBulkActions();
+        };
+    }
+
+    if (selectABtn) {
+        selectABtn.onclick = async () => {
+            if (!canMutateSelection()) return;
+            if (!grade || gradeSchools.length === 0) {
+                alert("먼저 학년을 선택하세요.");
+                return;
+            }
+            selectedSchools.clear();
+            gradeSchools.forEach(s => {
+                if (getSchoolGroupCode(s) === "A") {
+                    selectedSchools.add(s);
+                }
+            });
+            updateSelectedInfo();
+            updateSchoolStyles();
+            await renderUnits();
+            updateBulkActions();
+        };
+    }
+
+    if (selectBBtn) {
+        selectBBtn.onclick = async () => {
+            if (!canMutateSelection()) return;
+            if (!grade || gradeSchools.length === 0) {
+                alert("먼저 학년을 선택하세요.");
+                return;
+            }
+            selectedSchools.clear();
+            gradeSchools.forEach(s => {
+                if (getSchoolGroupCode(s) === "B") {
+                    selectedSchools.add(s);
+                }
+            });
             updateSelectedInfo();
             updateSchoolStyles();
             await renderUnits();
@@ -213,7 +297,7 @@ function renderSchoolList() {
 
     gradeSchools.forEach(s => {
         const li = document.createElement("li");
-        li.textContent = s;
+        li.textContent = s + getSchoolGroupSuffix(s);
         li.dataset.school = s;
         li.classList.add("school-item");
         li.onclick = () => toggleSchoolSelection(s);
@@ -267,7 +351,7 @@ function updateSelectedInfo() {
     parts.push(`선택 학교 ${selectedSchools.size}개`);
 
     if (selectedSchools.size > 0) {
-        const preview = Array.from(selectedSchools).slice(0, 4).join(", ");
+        const preview = Array.from(selectedSchools).slice(0, 4).map(s => s + getSchoolGroupSuffix(s)).join(", ");
         const extra = selectedSchools.size > 4 ? ` 외 ${selectedSchools.size - 4}개` : "";
         parts.push(`학교: ${preview}${extra}`);
     }
@@ -324,7 +408,7 @@ async function renderUnits() {
         if (myToken !== renderToken) return;
 
         for (const sch of schoolsArr) {
-            const data = bundle[sch] || { codes: [], names: {}, range: "", exam_period: "", science_date: "" };
+            const data = bundle[sch] || { codes: [], names: {}, range: "", exam_period: "", science_date: "", group: {} };
             const card = buildSchoolCardFromData(grade, sch, data);
             container.appendChild(card);
         }
@@ -361,12 +445,15 @@ function buildSchoolCardFromData(gradeVal, schoolName, data) {
 
     const title = document.createElement("div");
     title.classList.add("school-card-title");
-    title.textContent = `${gradeVal}학년 ${schoolName}`;
+    const groupCode = (data.group && data.group.code) ? String(data.group.code).toUpperCase() : getSchoolGroupCode(schoolName);
+    const groupSuffix = groupCode ? ` [${groupCode}]` : "";
+    title.textContent = `${gradeVal}학년 ${schoolName}${groupSuffix}`;
 
     const meta = document.createElement("div");
     meta.classList.add("school-card-meta");
 
     const metaParts = [];
+    if (data.group && data.group.label) metaParts.push(`그룹 ${data.group.label}`);
     if (data.exam_period) metaParts.push(`시험기간 ${data.exam_period}`);
     if (data.science_date) metaParts.push(`과학일 ${data.science_date}`);
     meta.textContent = metaParts.join(" / ") || "시험 정보 없음";
@@ -461,7 +548,8 @@ function updateCardStatusUI(gradeVal, schoolName) {
     cards.forEach(card => {
         const title = card.querySelector(".school-card-title");
         if (!title) return;
-        if (title.textContent !== `${gradeVal}학년 ${schoolName}`) return;
+        const baseTitle = `${gradeVal}학년 ${schoolName}`;
+        if (!title.textContent.startsWith(baseTitle)) return;
         card.querySelectorAll(".status-chip").forEach(chip => {
             const materialKey = chip.dataset.material;
             const status = getMaterialStatus(gradeVal, schoolName, materialKey);

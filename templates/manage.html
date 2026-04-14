@@ -51,10 +51,10 @@
 
     th.col-grade, td.col-grade   { width: 60px; text-align:center; }
     th.col-name,  td.col-name    { width: 120px; }
-    th.col-school,td.col-school  { width: 100px; }
+    th.col-school,td.col-school  { width: 140px; }
     th.col-range, td.col-range   { width: 220px; }
     th.col-period,td.col-period  { width: 110px; }
-    th.col-date,  td.col-date    { width: 150px; }
+    th.col-date,  td.col-date    { width: 180px; }
 
     th.col-check, td.col-check { width: 120px; text-align:center; }
 
@@ -107,12 +107,13 @@
       background:#f3f4f6;
     }
 
-    .science-date-btn:disabled {
-      opacity:.6;
-      cursor:not-allowed;
+    .science-date-btn.sel {
+      border:2px solid #111;
+      background:#e9f2ff;
+      font-weight:700;
     }
 
-    .science-date-value {
+    .science-date-current {
       display:inline-block;
       padding:4px 8px;
       border-radius:999px;
@@ -120,20 +121,30 @@
       border:1px solid #c7d2fe;
       font-size:12px;
       line-height:1.2;
+      font-weight:700;
     }
 
-    .science-date-edit-btn {
-      padding:4px 8px;
-      border:1px solid #ccc;
+    .group-badge {
+      display:inline-block;
+      margin-left:6px;
+      padding:2px 8px;
       border-radius:999px;
-      background:#fff;
-      cursor:pointer;
-      font-size:12px;
-      line-height:1.2;
+      font-size:11px;
+      font-weight:700;
+      line-height:1.4;
+      vertical-align:middle;
     }
 
-    .science-date-edit-btn:hover {
-      background:#f3f4f6;
+    .group-badge.a {
+      background:#dbeafe;
+      color:#1d4ed8;
+      border:1px solid #93c5fd;
+    }
+
+    .group-badge.b {
+      background:#ffedd5;
+      color:#c2410c;
+      border:1px solid #fdba74;
     }
 
     .sidebar-bottom {
@@ -236,6 +247,31 @@
       .replaceAll("&","&amp;")
       .replaceAll("<","&lt;")
       .replaceAll(">","&gt;");
+  }
+
+  function renderSchoolWithGroup(school, groupCode){
+    const rawSchool = String(school || "").trim();
+    const trimmedSchool = rawSchool.replace(/중학교\s*$/, "중");
+    const safeSchool = escapeHtml(trimmedSchool);
+
+    if(!groupCode) return safeSchool;
+
+    const cls = String(groupCode).toUpperCase() === "A" ? "a" : "b";
+    return `${safeSchool} <span class="group-badge ${cls}">${escapeHtml(groupCode)}</span>`;
+  }
+
+  function getGroupRuleText(rule){
+    if(!rule || !rule.cutoffText) return "";
+
+    const boundary = rule.direction === "부터"
+      ? `${rule.primaryLabel}=${rule.cutoffText}부터`
+      : `${rule.primaryLabel}=${rule.cutoffText}까지`;
+
+    return `그룹 기준: ${boundary} / 그 외 ${rule.secondaryLabel}`;
+  }
+
+  function makeScienceDayKey(grade, school){
+    return `science_day:${grade}:${school}`;
   }
 
   function updateApplyBtn(){
@@ -375,123 +411,100 @@
     const endMonth = parseInt(m[3], 10);
     const endDay = parseInt(m[4], 10);
 
-    const d1 = `${startMonth}/${startDay}`;
-    const d2 = `${endMonth}/${endDay}`;
+    const start = new Date(2026, startMonth - 1, startDay);
+    const end = new Date(2026, endMonth - 1, endDay);
 
-    if (startMonth === endMonth && startDay === endDay) {
-      return [d1];
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return [];
     }
 
-    return [d1, d2];
+    const out = [];
+    const cur = new Date(start);
+
+    while (cur <= end) {
+      out.push(`${cur.getMonth() + 1}/${cur.getDate()}`);
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    return out;
   }
 
-  async function saveScienceDate(st, dateText, td, prevStatus){
-    td.dataset.saving = "1";
-
-    try {
-      const res = await fetch("/manage/api/save_science_day", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grade: st.grade,
-          school: st.school,
-          value: dateText
-        })
-      });
-
-      const data = await res.json();
-
-      if(!data.ok){
-        alert("과학일 저장 실패: " + (data.error || "알 수 없는 오류"));
-        td.dataset.saving = "";
-        setStatus(prevStatus);
-        renderScienceDateDisplay(td, st);
-        return;
-      }
-
-      st.exam_date = dateText;
-      td.dataset.saving = "";
-      renderScienceDateDisplay(td, st);
-      setStatus(`과학일 저장 완료 (${st.school} / ${dateText})`);
-    } catch (e) {
-      console.error(e);
-      alert("과학일 저장 중 오류가 발생했습니다.");
-      td.dataset.saving = "";
-      setStatus(prevStatus);
-      renderScienceDateDisplay(td, st);
+  function getPendingScienceValue(st){
+    const key = makeScienceDayKey(st.grade, st.school);
+    if(state.pending.has(key)){
+      return String(state.pending.get(key).value || "");
     }
+    return String(st.exam_date || "").trim();
+  }
+
+  function syncScienceDateCells(grade, school){
+    tbodyEl.querySelectorAll(`td[data-science-school="${school}"][data-science-grade="${grade}"]`)
+      .forEach(td => {
+        if (td._student) {
+          renderScienceDateEditor(td, td._student);
+        }
+      });
   }
 
   function renderScienceDateEditor(td, st){
     td.innerHTML = "";
 
     const options = parsePeriodDates(st.period);
+    const savedValue = String(st.exam_date || "").trim();
 
     if(options.length === 0){
-      td.textContent = "";
+      td.textContent = savedValue;
       return;
     }
 
+    const currentValue = getPendingScienceValue(st);
     const wrap = document.createElement("div");
     wrap.className = "science-date-wrap";
+
+    if (savedValue) {
+      const currentBadge = document.createElement("span");
+      currentBadge.className = "science-date-current";
+      currentBadge.textContent = `현재: ${savedValue}`;
+      wrap.appendChild(currentBadge);
+    }
 
     options.forEach(dateText => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = dateText;
-      btn.className = "science-date-btn";
+      btn.className = "science-date-btn" + (currentValue === dateText ? " sel" : "");
 
-      btn.onclick = async () => {
-        if(td.dataset.saving === "1") return;
+      btn.onclick = () => {
+        const key = makeScienceDayKey(st.grade, st.school);
 
-        wrap.querySelectorAll("button").forEach(b => b.disabled = true);
-        const prevStatus = statusEl.textContent;
-        setStatus(`과학일 저장 중... (${st.school} / ${dateText})`);
-        await saveScienceDate(st, dateText, td, prevStatus);
+        if(dateText === savedValue){
+          unmarkPending(key);
+        } else {
+          markPending(key, {
+            type: "science_day",
+            grade: st.grade,
+            school: st.school,
+            value: dateText
+          });
+        }
+
+        syncScienceDateCells(st.grade, st.school);
       };
 
       wrap.appendChild(btn);
     });
 
     td.appendChild(wrap);
-  }
-
-  function renderScienceDateDisplay(td, st){
-    td.innerHTML = "";
-
-    const examDate = String(st.exam_date || "").trim();
-
-    if(!examDate){
-      renderScienceDateEditor(td, st);
-      return;
-    }
-
-    const wrap = document.createElement("div");
-    wrap.className = "science-date-wrap";
-
-    const valueSpan = document.createElement("span");
-    valueSpan.className = "science-date-value";
-    valueSpan.textContent = examDate;
-
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "science-date-edit-btn";
-    editBtn.textContent = "수정";
-
-    editBtn.onclick = () => {
-      if(td.dataset.saving === "1") return;
-      renderScienceDateEditor(td, st);
-    };
-
-    wrap.appendChild(valueSpan);
-    wrap.appendChild(editBtn);
-    td.appendChild(wrap);
+    td.classList.toggle("pending", state.pending.has(makeScienceDayKey(st.grade, st.school)));
   }
 
   function createScienceDateCell(st){
     const td = document.createElement("td");
     td.className = "col-date";
-    renderScienceDateDisplay(td, st);
+    td.dataset.scienceSchool = st.school;
+    td.dataset.scienceGrade = st.grade;
+    td._student = st;
+    renderScienceDateEditor(td, st);
     return td;
   }
 
@@ -529,7 +542,7 @@
         <tr data-row="${st.sheet_row}">
           <td class="col-grade">${escapeHtml(st.grade || state.grade)}</td>
           <td class="col-name">${escapeHtml(st.name)}</td>
-          <td class="col-school">${escapeHtml(st.school)}</td>
+          <td class="col-school">${renderSchoolWithGroup(st.school, st.group_code)}</td>
           <td class="col-range">${escapeHtml(st.range)}</td>
           <td class="col-period">${escapeHtml(st.period)}</td>
           <td class="col-date" data-science-date="1"></td>
@@ -572,7 +585,8 @@
       });
 
       tableEl.style.display = "";
-      setStatus(`총 ${students.length}명`);
+      const groupRuleText = getGroupRuleText(data.currentGroupRule);
+      setStatus(`총 ${students.length}명${groupRuleText ? " / " + groupRuleText : ""}`);
     } catch (e) {
       console.error(e);
       setStatus("학생 명단 로드 실패");
@@ -621,7 +635,7 @@
 
     [...classList.querySelectorAll("button")].forEach(btn => btn.classList.remove("active"));
 
-    titleEl.textContent = "직전보강 (과학일 기준 정렬)";
+    titleEl.textContent = "직전보강 (시험기간 기준 정렬)";
     setStatus("불러오는 중...");
     tableEl.style.display = "none";
     tbodyEl.innerHTML = "";
@@ -645,7 +659,7 @@
         <tr data-row="${st.sheet_row}" data-sheet="${st.sheet}">
           <td class="col-grade">${escapeHtml(st.grade)}</td>
           <td class="col-name">${escapeHtml(st.name)}</td>
-          <td class="col-school">${escapeHtml(st.school)}</td>
+          <td class="col-school">${renderSchoolWithGroup(st.school, st.group_code)}</td>
           <td class="col-range">${escapeHtml(st.range)}</td>
           <td class="col-period">${escapeHtml(st.period)}</td>
           <td class="col-date">${escapeHtml(st.exam_date)}</td>
@@ -681,7 +695,8 @@
       });
 
       tableEl.style.display = "";
-      setStatus(`총 ${students.length}명`);
+      const groupRuleText = getGroupRuleText(data.currentGroupRule);
+      setStatus(`총 ${students.length}명${groupRuleText ? " / " + groupRuleText : ""}`);
     } catch (e) {
       console.error(e);
       setStatus("직전보강 로드 실패");
@@ -762,6 +777,12 @@
       state.pending.clear();
       updateApplyBtn();
       clearPendingUI();
+
+      if(mode === "recent"){
+        await loadRecent();
+      } else if(state.className){
+        await selectClass(state.className);
+      }
 
       setStatus(`적용 완료 (${applied}건)`);
     }catch(e){

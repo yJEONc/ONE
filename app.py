@@ -414,6 +414,125 @@ def parse_grade_num(s):
         return 999
 
 
+
+def parse_period_end(s: str):
+    if not s:
+        return None
+
+    t = str(s).strip()
+    if not t or "미확정" in t:
+        return None
+
+    matches = re.findall(r"(\d{1,2})\s*[./-]\s*(\d{1,2})", t)
+    if not matches:
+        return None
+
+    month = int(matches[-1][0])
+    day = int(matches[-1][1])
+
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+
+    return (month, day)
+
+
+def detect_group_code(label: str, default="A"):
+    t = (label or "").strip().upper()
+    if t.startswith("A"):
+        return "A"
+    if t.startswith("B"):
+        return "B"
+    return default
+
+
+def serialize_group_rule(rule):
+    if not rule:
+        return None
+
+    return {
+        "currentHeader": rule.get("current_header", ""),
+        "primaryCode": rule.get("primary_code", ""),
+        "primaryLabel": rule.get("primary_label", ""),
+        "secondaryCode": rule.get("secondary_code", ""),
+        "secondaryLabel": rule.get("secondary_label", ""),
+        "cutoffText": rule.get("cutoff_text", ""),
+        "direction": rule.get("direction", ""),
+    }
+
+
+def get_current_group_rule():
+    """
+    settings 시트에서 현재 진행 중인 시험(A1)을 기준으로
+    같은 이름이 A열에 있는 행의 C/D/E 값을 읽는다.
+    """
+    sh = get_spreadsheet()
+    settings_ws = sh.worksheet("settings")
+
+    current_header = get_current_sort_header(settings_ws)
+    rows = settings_ws.get_all_values()
+
+    target_row = None
+    for row in rows:
+        a = (row[0] if len(row) > 0 else "").strip()
+        if a == current_header:
+            target_row = row
+            break
+
+    if not target_row:
+        return None
+
+    primary_label = (target_row[2] if len(target_row) > 2 else "").strip() or "A그룹"
+    cutoff_text = (target_row[3] if len(target_row) > 3 else "").strip()
+    direction = (target_row[4] if len(target_row) > 4 else "").strip() or "까지"
+
+    cutoff_mmdd = parse_mmdd(cutoff_text)
+    if cutoff_mmdd is None:
+        return None
+
+    primary_code = detect_group_code(primary_label, "A")
+    secondary_code = "B" if primary_code == "A" else "A"
+    secondary_label = "B그룹" if primary_code == "A" else "A그룹"
+
+    return {
+        "current_header": current_header,
+        "primary_code": primary_code,
+        "primary_label": primary_label,
+        "secondary_code": secondary_code,
+        "secondary_label": secondary_label,
+        "cutoff_text": cutoff_text,
+        "cutoff_mmdd": cutoff_mmdd,
+        "direction": direction,
+    }
+
+
+def get_group_for_period(period_text, rule):
+    if not rule:
+        return {"code": "", "label": ""}
+
+    period_end = parse_period_end(period_text)
+    if period_end is None:
+        return {"code": "", "label": ""}
+
+    cutoff = rule["cutoff_mmdd"]
+    direction = rule["direction"]
+
+    if direction == "부터":
+        is_primary = period_end >= cutoff
+    else:
+        is_primary = period_end <= cutoff
+
+    if is_primary:
+        return {
+            "code": rule["primary_code"],
+            "label": rule["primary_label"],
+        }
+
+    return {
+        "code": rule["secondary_code"],
+        "label": rule["secondary_label"],
+    }
+
+
 def load_manage_grade(grade):
     sheet = sheet_name_by_grade(grade)
 
@@ -1240,6 +1359,7 @@ def manage_api_students():
 
         rows = get_manage_grade_rows(grade)
         students = []
+        group_rule = get_current_group_rule()
 
         for i, row in enumerate(rows):
             a = (row[0] if len(row) > 0 else "").strip()
@@ -1250,6 +1370,9 @@ def manage_api_students():
                 return row[idx] if len(row) > idx else ""
 
             sheet_row = i + 2
+            period = get(4)
+            exam_date = get(5)
+            group_info = get_group_for_period(period, group_rule)
 
             students.append({
                 "sheet": sheet,
@@ -1259,15 +1382,48 @@ def manage_api_students():
                 "name": get(1),
                 "school": get(2),
                 "range": get(3),
-                "period": get(4),
-                "exam_date": get(5),
+                "period": period,
+                "exam_date": exam_date,
                 "otwo": get(6),
                 "essay": get(7),
                 "freq": get(8),
                 "freq_essay": get(9),
+                "group_code": group_info["code"],
+                "group_label": group_info["label"],
+                "_period_start": parse_period_start(period),
+                "_science_mmdd": parse_mmdd(exam_date),
             })
 
-        return jsonify({"ok": True, "grade": grade, "class": class_name, "students": students})
+        def sort_key(st):
+            period_start = st.get("_period_start")
+            period_key = (99, 99) if period_start is None else period_start
+
+            science_mmdd = st.get("_science_mmdd")
+            science_key = (99, 99) if science_mmdd is None else science_mmdd
+
+            school_key = str(st.get("school") or "").strip()
+            name_key = str(st.get("name") or "").strip()
+
+            return (
+                period_key[0], period_key[1],
+                science_key[0], science_key[1],
+                school_key,
+                name_key
+            )
+
+        students.sort(key=sort_key)
+
+        for st in students:
+            st.pop("_period_start", None)
+            st.pop("_science_mmdd", None)
+
+        return jsonify({
+            "ok": True,
+            "grade": grade,
+            "class": class_name,
+            "students": students,
+            "currentGroupRule": serialize_group_rule(group_rule),
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1276,6 +1432,7 @@ def manage_api_students():
 def manage_api_recent():
     try:
         all_students = []
+        group_rule = get_current_group_rule()
 
         for grade, sheet in [("1", "M1"), ("2", "M2"), ("3", "M3")]:
             rows = get_manage_grade_rows(grade)
@@ -1294,6 +1451,7 @@ def manage_api_recent():
 
                 science_mmdd = parse_mmdd(exam_date)
                 period_start = parse_period_start(period)
+                group_info = get_group_for_period(period, group_rule)
 
                 all_students.append({
                     "sheet": sheet,
@@ -1312,25 +1470,29 @@ def manage_api_recent():
                     "jb1": get(10),
                     "jb2": get(11),
                     "jb3": get(12),
+                    "group_code": group_info["code"],
+                    "group_label": group_info["label"],
                     "_science_mmdd": science_mmdd,
                     "_period_start": period_start,
                 })
 
         def sort_key(st):
-            science_mmdd = st.get("_science_mmdd")
-            science_key = (99, 99) if science_mmdd is None else science_mmdd
-
             period_start = st.get("_period_start")
             period_key = (99, 99) if period_start is None else period_start
 
+            science_mmdd = st.get("_science_mmdd")
+            science_key = (99, 99) if science_mmdd is None else science_mmdd
+
             school_key = str(st.get("school") or "").strip()
             grade_key = parse_grade_num(st.get("grade"))
+            name_key = str(st.get("name") or "").strip()
 
             return (
-                science_key[0], science_key[1],
                 period_key[0], period_key[1],
+                science_key[0], science_key[1],
                 school_key,
-                grade_key
+                grade_key,
+                name_key
             )
 
         all_students.sort(key=sort_key)
@@ -1339,10 +1501,13 @@ def manage_api_recent():
             st.pop("_science_mmdd", None)
             st.pop("_period_start", None)
 
-        return jsonify({"ok": True, "students": all_students})
+        return jsonify({
+            "ok": True,
+            "students": all_students,
+            "currentGroupRule": serialize_group_rule(group_rule),
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 @app.post("/manage/api/save_science_day")
 def manage_api_save_science_day():
@@ -1391,7 +1556,30 @@ def manage_api_apply():
         allowed_cols = set(CHECK_COLS + RECENT_TEXT_COLS)
 
         updates = []
+        science_day_changes = []
+
         for ch in changes:
+            change_type = str(ch.get("type") or "").strip()
+
+            if change_type == "science_day":
+                science_grade = str(ch.get("grade") or grade or "").strip()
+                school = str(ch.get("school") or "").strip()
+                value = "" if ch.get("value") is None else str(ch.get("value")).strip()
+
+                if science_grade not in GRADE_SHEETS:
+                    return jsonify({"ok": False, "error": "invalid grade for science_day"}), 400
+                if not school:
+                    return jsonify({"ok": False, "error": "missing school for science_day"}), 400
+                if not re.fullmatch(r"\d{1,2}/\d{1,2}", value):
+                    return jsonify({"ok": False, "error": f"invalid science day format: {value}"}), 400
+
+                science_day_changes.append({
+                    "grade": science_grade,
+                    "school": school,
+                    "value": value,
+                })
+                continue
+
             sheet_row = int(ch.get("sheet_row"))
             col = str(ch.get("col")).upper()
             value = "" if ch.get("value") is None else str(ch.get("value"))
@@ -1422,15 +1610,26 @@ def manage_api_apply():
                 body={"valueInputOption": "USER_ENTERED", "data": updates}
             ).execute()
 
+        for item in science_day_changes:
+            save_science_day_to_raw_schedule(
+                item["grade"],
+                item["school"],
+                item["value"]
+            )
+
         cache.clear()
         clear_manage_cache()
 
-        return jsonify({"ok": True, "applied": len(updates)})
+        return jsonify({
+            "ok": True,
+            "applied": len(updates) + len(science_day_changes),
+            "cell_applied": len(updates),
+            "science_day_applied": len(science_day_changes),
+        })
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
-
+    
 # =========================================================
 # 3) 내신자료 생성 API
 # =========================================================
@@ -1447,9 +1646,22 @@ def generate_api_grade_schools():
     try:
         data = request.get_json(force=True) or {}
         grade = str(data["grade"])
+
+        schools = read_grade_schools(grade)
+        surveyed = read_surveyed_grade_schools(grade)
+        school_meta = read_grade_school_meta(grade)
+        group_rule = get_current_group_rule()
+
+        school_groups = {}
+        for school in schools:
+            meta = school_meta.get(school, {})
+            school_groups[school] = get_group_for_period(meta.get("exam_period", ""), group_rule)
+
         return jsonify({
-            "schools": read_grade_schools(grade),
-            "surveyedSchools": read_surveyed_grade_schools(grade),
+            "schools": schools,
+            "surveyedSchools": surveyed,
+            "schoolGroups": school_groups,
+            "currentGroupRule": serialize_group_rule(group_rule),
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -1485,6 +1697,7 @@ def generate_api_bundle_units():
         school_codes = {}
         all_codes = set()
         school_meta = read_grade_school_meta(grade)
+        group_rule = get_current_group_rule()
 
         for sch in schools:
             codes = read_units_codes(grade, sch)
@@ -1502,6 +1715,7 @@ def generate_api_bundle_units():
                 "range": meta.get("range", ""),
                 "exam_period": meta.get("exam_period", ""),
                 "science_date": meta.get("science_date", ""),
+                "group": get_group_for_period(meta.get("exam_period", ""), group_rule),
             }
 
         return jsonify(out)

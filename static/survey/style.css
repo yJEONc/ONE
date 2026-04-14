@@ -388,3 +388,26 @@ body {
         align-items: flex-start;
     }
 }
+
+.group-rule-info{
+  display:none;
+  margin-bottom:16px;
+  padding:12px 14px;
+  border-radius:10px;
+  background:#111827;
+  border:1px solid #334155;
+  color:#cbd5e1;
+  font-size:14px;
+}
+
+.group-rule-info.visible{
+  display:block;
+}
+
+.school-item.group-a{
+  border-left:4px solid #3b82f6;
+}
+
+.school-item.group-b{
+  border-left:4px solid #f97316;
+}
