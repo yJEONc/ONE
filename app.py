@@ -55,6 +55,10 @@ GRADE_SHEETS = {"1": "M1", "2": "M2", "3": "M3"}
 CHECK_COLS = ["G", "H", "I", "J"]
 ALLOWED_MARKS = {"⭕", "△", "✕", ""}
 
+# 출결 컬럼
+ATTENDANCE_COL = "O"
+ALLOWED_ATTENDANCE = {"출석", "자료", "결석", ""}
+
 # 직전보강 입력 컬럼
 RECENT_TEXT_COLS = ["K", "L", "M"]
 
@@ -539,7 +543,7 @@ def load_manage_grade(grade):
     svc = get_sheets_service(readonly=False)
     resp = svc.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{sheet}!A2:M"
+        range=f"{sheet}!A2:O"
     ).execute()
 
     rows = resp.get("values", [])
@@ -1388,6 +1392,7 @@ def manage_api_students():
                 "essay": get(7),
                 "freq": get(8),
                 "freq_essay": get(9),
+                "attendance": get(14),
                 "group_code": group_info["code"],
                 "group_label": group_info["label"],
                 "_period_start": parse_period_start(period),
@@ -1468,6 +1473,7 @@ def manage_api_recent():
                     "freq": get(8),
                     "freq_essay": get(9),
                     "jb1": get(10),
+                    "attendance": get(14),
                     "jb2": get(11),
                     "jb3": get(12),
                     "group_code": group_info["code"],
@@ -1553,7 +1559,7 @@ def manage_api_apply():
         grade = data.get("grade")
         default_sheet = sheet_name_by_grade(str(grade)) if grade else None
 
-        allowed_cols = set(CHECK_COLS + RECENT_TEXT_COLS)
+        allowed_cols = set(CHECK_COLS + [ATTENDANCE_COL] + RECENT_TEXT_COLS)
 
         updates = []
         science_day_changes = []
@@ -1593,6 +1599,9 @@ def manage_api_apply():
                 return jsonify({"ok": False, "error": "invalid row"}), 400
 
             if col in CHECK_COLS and value not in ALLOWED_MARKS:
+                return jsonify({"ok": False, "error": f"invalid value for {col}: {value}"}), 400
+
+            if col == ATTENDANCE_COL and value not in ALLOWED_ATTENDANCE:
                 return jsonify({"ok": False, "error": f"invalid value for {col}: {value}"}), 400
 
             if col in RECENT_TEXT_COLS and len(value) > 200:
