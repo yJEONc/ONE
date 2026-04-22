@@ -9,7 +9,7 @@ let schoolGroups = {};
 let currentGroupRule = null;
 
 const STATUS_STORAGE_KEY = "vm_generate_download_status_v1";
-const MATERIAL_KEYS = ["서술형", "최다빈출", "오투", "Final"];
+const MATERIAL_KEYS = ["서술형", "최다빈출", "오투", "Final", "직전보강"];
 
 let downloadStatus = loadDownloadStatus();
 
@@ -522,6 +522,7 @@ function buildSchoolCardFromData(gradeVal, schoolName, data) {
         { label: "최다빈출 전체 합치기", key: "최다빈출" },
         { label: "Final 모의고사 합치기", key: "Final" },
         { label: "오투 모의고사 합치기", key: "오투" },
+        { label: "직전보강 합치기", key: "직전보강" },
     ];
 
     buttons.forEach(info => {
@@ -587,6 +588,22 @@ function getDownloadConfig(materialKey) {
             filename: (g, s) => `${g}학년_${s}_FINAL모의고사.pdf`
         };
     }
+    if (materialKey === "직전보강") {
+        return {
+            endpoints: [
+                {
+                    endpoint: "/generate/api/merge_recent",
+                    body: (g, s) => ({ grade: g, school: s, round: 1 }),
+                    filename: (g, s) => `${s}_${g}학년_직전보강_1회차.pdf`
+                },
+                {
+                    endpoint: "/generate/api/merge_recent",
+                    body: (g, s) => ({ grade: g, school: s, round: 2 }),
+                    filename: (g, s) => `${s}_${g}학년_직전보강_2회차.pdf`
+                }
+            ]
+        };
+    }
     return {
         endpoint: "/generate/api/merge_otoo",
         body: (g, s) => ({ grade: g, school: s }),
@@ -608,26 +625,31 @@ async function triggerDownloadFromResponse(response, filename) {
 
 async function runSingleDownload(gradeVal, schoolName, materialKey) {
     const config = getDownloadConfig(materialKey);
+    const jobs = Array.isArray(config.endpoints) ? config.endpoints : [config];
 
     setMaterialStatus(gradeVal, schoolName, materialKey, "downloading");
     updateCardStatusUI(gradeVal, schoolName);
     setBulkStatus(`${schoolName} / ${materialKey} 다운로드 중...`);
 
     try {
-        const response = await fetch(config.endpoint, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(config.body(gradeVal, schoolName))
-        });
+        for (let i = 0; i < jobs.length; i++) {
+            const job = jobs[i];
+            const response = await fetch(job.endpoint, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(job.body(gradeVal, schoolName))
+            });
 
-        if (!response.ok) {
-            setMaterialStatus(gradeVal, schoolName, materialKey, "error");
-            updateCardStatusUI(gradeVal, schoolName);
-            setBulkStatus(`${schoolName} / ${materialKey} 다운로드 실패`);
-            return false;
+            if (!response.ok) {
+                setMaterialStatus(gradeVal, schoolName, materialKey, "error");
+                updateCardStatusUI(gradeVal, schoolName);
+                setBulkStatus(`${schoolName} / ${materialKey} 다운로드 실패`);
+                return false;
+            }
+
+            await triggerDownloadFromResponse(response, job.filename(gradeVal, schoolName));
         }
 
-        await triggerDownloadFromResponse(response, config.filename(gradeVal, schoolName));
         setMaterialStatus(gradeVal, schoolName, materialKey, "done");
         updateCardStatusUI(gradeVal, schoolName);
         setBulkStatus(`${schoolName} / ${materialKey} 다운로드 완료`);

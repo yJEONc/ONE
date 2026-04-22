@@ -915,6 +915,7 @@ def get_cover_title(material_type, grade, school):
         "최다빈출": f"{school}_{grade_text}_1주차 B",
         "오투": f"{school}_{grade_text}_2주차 A",
         "FINAL": f"{school}_{grade_text}_2주차 B",
+        "직전보강": f"{school}_{grade_text}_직전보강",
     }
 
     title = mapping.get(material_type)
@@ -1884,6 +1885,87 @@ def generate_api_merge_otoo():
             buf,
             as_attachment=True,
             download_name=f'{grade}학년_{school}_오투모의고사.pdf',
+            mimetype="application/pdf"
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            if merger is not None:
+                merger.close()
+        except Exception:
+            pass
+        try:
+            if cover_buf is not None:
+                cover_buf.close()
+        except Exception:
+            pass
+
+
+def find_recent_round_files(grade, round_no, nums):
+    folder = f"data/직전보강/{grade}학년/{round_no}회차"
+    if not os.path.isdir(folder):
+        return None, [], []
+
+    all_files = [f for f in os.listdir(folder) if f.lower().endswith(".pdf")]
+
+    question_files = []
+    answer_files = []
+
+    for n in nums:
+        q_pat = re.compile(rf"^{n}\s*단원(?!\s*해설)\s*\.pdf$", re.IGNORECASE)
+        a_pat = re.compile(rf"^{n}\s*단원\s*해설\s*\.pdf$", re.IGNORECASE)
+
+        q_name = next((f for f in all_files if q_pat.search(f)), None)
+        a_name = next((f for f in all_files if a_pat.search(f)), None)
+
+        if q_name:
+            question_files.append(os.path.join(folder, q_name))
+        if a_name:
+            answer_files.append(os.path.join(folder, a_name))
+
+    return folder, question_files, answer_files
+
+
+@app.route("/generate/api/merge_recent", methods=["POST"])
+def generate_api_merge_recent():
+    merger = None
+    cover_buf = None
+    try:
+        d = request.get_json(force=True) or {}
+        grade = str(d["grade"])
+        school = str(d["school"])
+        round_no = int(d.get("round", 1))
+
+        units = read_units_codes(grade, school)
+        nums = sorted({int(u.split("-")[0]) for u in units if "-" in u})
+
+        folder, question_files, answer_files = find_recent_round_files(grade, round_no, nums)
+
+        if folder is None:
+            return jsonify({"error": "folder_not_found", "folder": f"data/직전보강/{grade}학년/{round_no}회차"}), 404
+
+        merger = PdfMerger()
+        cover_buf = append_cover_page(merger, "직전보강", grade, school)
+
+        appended = 0
+        for path in question_files:
+            merger.append(path)
+            appended += 1
+        for path in answer_files:
+            merger.append(path)
+            appended += 1
+
+        if appended == 0:
+            return jsonify({"error": "no_files"}), 404
+
+        buf = io.BytesIO()
+        merger.write(buf)
+        buf.seek(0)
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f'{school}_{grade}학년_직전보강_{round_no}회차.pdf',
             mimetype="application/pdf"
         )
     except Exception as e:
