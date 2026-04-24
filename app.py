@@ -62,6 +62,9 @@ ALLOWED_ATTENDANCE = {"출석", "자료", "결석", ""}
 # 직전보강 입력 컬럼
 RECENT_TEXT_COLS = ["K", "L", "M"]
 
+# 가채점/결과 입력 컬럼
+SCORE_RESULT_COLS = ["P", "Q"]
+
 # 내신자료 생성 시트명
 SHEET_SCHOOL = "class+"
 SHEET_END = "end"
@@ -543,7 +546,7 @@ def load_manage_grade(grade):
     svc = get_sheets_service(readonly=False)
     resp = svc.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{sheet}!A2:O"
+        range=f"{sheet}!A2:Q"
     ).execute()
 
     rows = resp.get("values", [])
@@ -1394,6 +1397,8 @@ def manage_api_students():
                 "freq": get(8),
                 "freq_essay": get(9),
                 "attendance": get(14),
+                "pre_score": get(15),
+                "result": get(16),
                 "group_code": group_info["code"],
                 "group_label": group_info["label"],
                 "_period_start": parse_period_start(period),
@@ -1475,6 +1480,8 @@ def manage_api_recent():
                     "freq_essay": get(9),
                     "jb1": get(10),
                     "attendance": get(14),
+                    "pre_score": get(15),
+                    "result": get(16),
                     "jb2": get(11),
                     "jb3": get(12),
                     "group_code": group_info["code"],
@@ -1560,7 +1567,7 @@ def manage_api_apply():
         grade = data.get("grade")
         default_sheet = sheet_name_by_grade(str(grade)) if grade else None
 
-        allowed_cols = set(CHECK_COLS + [ATTENDANCE_COL] + RECENT_TEXT_COLS)
+        allowed_cols = set(CHECK_COLS + [ATTENDANCE_COL] + RECENT_TEXT_COLS + SCORE_RESULT_COLS)
 
         updates = []
         science_day_changes = []
@@ -1606,6 +1613,9 @@ def manage_api_apply():
                 return jsonify({"ok": False, "error": f"invalid value for {col}: {value}"}), 400
 
             if col in RECENT_TEXT_COLS and len(value) > 200:
+                return jsonify({"ok": False, "error": f"value too long for {col}"}), 400
+
+            if col in SCORE_RESULT_COLS and len(value) > 200:
                 return jsonify({"ok": False, "error": f"value too long for {col}"}), 400
 
             updates.append({

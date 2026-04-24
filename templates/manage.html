@@ -66,6 +66,8 @@
     th.col-class, td.col-class   { width: 90px; text-align:center; }
     th.col-name,  td.col-name    { width: 120px; }
     th.col-school,td.col-school  { width: 140px; }
+    th.col-score, td.col-score   { width: 90px; text-align:center; }
+    th.col-result,td.col-result  { width: 100px; text-align:center; }
     th.col-range, td.col-range   { width: 220px; }
     th.col-period,td.col-period  { width: 110px; }
     th.col-date,  td.col-date    { width: 92px; text-align:center; }
@@ -82,6 +84,19 @@
       outline: none;
     }
     .jb-input:focus{
+      border-color:#333;
+    }
+
+    .score-input, .result-input{
+      width: 78px;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      outline: none;
+      text-align:center;
+    }
+    .result-input{ width: 88px; }
+    .score-input:focus, .result-input:focus{
       border-color:#333;
     }
 
@@ -249,6 +264,8 @@
             <th class="col-class">반명</th>
             <th class="col-name">학생명</th>
             <th class="col-school">학교</th>
+            <th class="col-score">가채점</th>
+            <th class="col-result">결과</th>
             <th class="col-range">시험범위</th>
             <th class="col-period">시험기간</th>
             <th class="col-date">과학일</th>
@@ -280,6 +297,8 @@
 
   const COL_MAP = { otwo: "G", essay: "H", freq: "I", freq_essay: "J" };
   const ATTENDANCE_COL = "O";
+  const PRE_SCORE_COL = "P";
+  const RESULT_COL = "Q";
   const JB_COL_MAP = { jb1: "K", jb2: "L", jb3: "M" };
   const MATERIAL_COLLAPSE_KEY = "manage_materials_collapsed_v1";
 
@@ -634,6 +653,37 @@
     return td;
   }
 
+
+  function renderTextInputCell(sheetRow, col, originalValue, className, sheetName = null){
+    const key = sheetName ? `${sheetName}:${sheetRow}:${col}` : `${sheetRow}:${col}`;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = className;
+    input.value = String(originalValue || "");
+
+    const td = document.createElement("td");
+    td.className = col === PRE_SCORE_COL ? "col-score" : "col-result";
+    td.appendChild(input);
+
+    function syncPending(){
+      const cur = input.value;
+      const orig = String(originalValue || "");
+      if(cur === orig){
+        unmarkPending(key);
+        td.classList.remove("pending");
+      }else{
+        const payload = sheetName
+          ? { sheet: sheetName, sheet_row: sheetRow, col, value: cur }
+          : { sheet_row: sheetRow, col, value: cur };
+        markPending(key, payload);
+        td.classList.add("pending");
+      }
+    }
+
+    input.addEventListener("input", syncPending);
+    return td;
+  }
+
   async function selectClass(cn){
     setMode("class");
     state.className = cn;
@@ -669,6 +719,8 @@
           <td class="col-class">${escapeHtml(st.class || state.className)}</td>
           <td class="col-name">${escapeHtml(st.name)}</td>
           <td class="col-school">${renderSchoolWithGroup(st.school, st.group_code)}</td>
+          <td class="col-score" data-pre-score="1"></td>
+          <td class="col-result" data-result="1"></td>
           <td class="col-range">${escapeHtml(st.range)}</td>
           <td class="col-period">${escapeHtml(st.period)}</td>
           <td class="col-date" data-science-date="1"></td>
@@ -689,6 +741,15 @@
         const scienceTd = tr.querySelector(`td[data-science-date="1"]`);
         const newScienceTd = createScienceDateCell(st);
         scienceTd.replaceWith(newScienceTd);
+
+        const preScoreTd = tr.querySelector(`td[data-pre-score="1"]`);
+        const newPreScoreTd = renderTextInputCell(st.sheet_row, PRE_SCORE_COL, st.pre_score, "score-input");
+        preScoreTd.replaceWith(newPreScoreTd);
+
+        const resultTd = tr.querySelector(`td[data-result="1"]`);
+        const newResultTd = renderTextInputCell(st.sheet_row, RESULT_COL, st.result, "result-input");
+        resultTd.replaceWith(newResultTd);
+
         const cells = tr.querySelectorAll(`td.col-check.class-only.material-col`);
         cells.forEach(td => {
           const field = td.getAttribute("data-field");
@@ -784,6 +845,8 @@
           <td class="col-class">${escapeHtml(st.class)}</td>
           <td class="col-name">${escapeHtml(st.name)}</td>
           <td class="col-school">${renderSchoolWithGroup(st.school, st.group_code)}</td>
+          <td class="col-score" data-pre-score="1"></td>
+          <td class="col-result" data-result="1"></td>
           <td class="col-range">${escapeHtml(st.range)}</td>
           <td class="col-period">${escapeHtml(st.period)}</td>
           <td class="col-date">${escapeHtml(st.exam_date)}</td>
@@ -816,6 +879,17 @@
               setCellPendingByTd(attendanceTd, state.pending.has(key));
             });
           });
+        }
+
+        const preScoreTd = tr.querySelector(`td[data-pre-score="1"]`);
+        const resultTd = tr.querySelector(`td[data-result="1"]`);
+        if (preScoreTd) {
+          const cell = renderTextInputCell(st.sheet_row, PRE_SCORE_COL, st.pre_score, "score-input", st.sheet);
+          preScoreTd.replaceWith(cell);
+        }
+        if (resultTd) {
+          const cell = renderTextInputCell(st.sheet_row, RESULT_COL, st.result, "result-input", st.sheet);
+          resultTd.replaceWith(cell);
         }
 
         const td1 = tr.querySelector(`td[data-jb="jb1"]`);
