@@ -910,15 +910,19 @@ def find_pdfs(material_type, grade, unit_code):
 
 
 
-def get_cover_title(material_type, grade, school):
+def get_cover_title(material_type, grade, school, round_no=None):
     grade_text = f"{grade}학년"
+
+    if material_type == "직전보강":
+        if round_no in (1, 2):
+            return f"{school}_{grade_text}_직전보강{round_no}"
+        return f"{school}_{grade_text}_직전보강"
 
     mapping = {
         "서술형": f"{school}_{grade_text}_1주차 A",
         "최다빈출": f"{school}_{grade_text}_1주차 B",
         "오투": f"{school}_{grade_text}_2주차 A",
         "FINAL": f"{school}_{grade_text}_2주차 B",
-        "직전보강": f"{school}_{grade_text}_직전보강",
     }
 
     title = mapping.get(material_type)
@@ -957,8 +961,8 @@ def create_cover_pdf_bytes(title):
     return buf
 
 
-def append_cover_page(merger, material_type, grade, school):
-    cover_title = get_cover_title(material_type, grade, school)
+def append_cover_page(merger, material_type, grade, school, round_no=None):
+    cover_title = get_cover_title(material_type, grade, school, round_no)
     cover_buf = create_cover_pdf_bytes(cover_title)
     merger.append(cover_buf)
     return cover_buf
@@ -1956,7 +1960,7 @@ def generate_api_merge_recent():
             return jsonify({"error": "folder_not_found", "folder": f"data/직전보강/{grade}학년/{round_no}회차"}), 404
 
         merger = PdfMerger()
-        cover_buf = append_cover_page(merger, "직전보강", grade, school)
+        cover_buf = append_cover_page(merger, "직전보강", grade, school, round_no)
 
         appended = 0
         for path in question_files:

@@ -220,6 +220,9 @@
     body[data-mode="recent"] .class-only { display:none; }
 
     body.materials-collapsed .material-col { display:none; }
+
+    body.score-result-collapsed .col-score,
+    body.score-result-collapsed .col-result { display:none; }
   
 /* compact tuning */
 .col-scope{max-width:220px;white-space:nowrap;}
@@ -229,7 +232,7 @@
 
 </style>
 </head>
-<body data-mode="class">
+<body data-mode="class" class="score-result-collapsed">
   <div class="wrap">
     <aside class="sidebar">
       <div class="label">학년</div>
@@ -254,6 +257,7 @@
         <div class="topbar-actions">
           <button class="refresh-btn" id="refreshBtn" type="button">데이터 업데이트</button>
           <button class="material-toggle-btn" id="materialToggleBtn" type="button">자료 접기</button>
+          <button class="material-toggle-btn" id="scoreResultToggleBtn" type="button">가채점/결과 펼치기</button>
           <button class="apply" id="applyBtn" disabled>적용 (0)</button>
         </div>
       </div>
@@ -301,6 +305,7 @@
   const RESULT_COL = "Q";
   const JB_COL_MAP = { jb1: "K", jb2: "L", jb3: "M" };
   const MATERIAL_COLLAPSE_KEY = "manage_materials_collapsed_v1";
+  const SCORE_RESULT_COLLAPSE_KEY = "manage_score_result_collapsed_v1";
 
   const gradeList = document.getElementById("gradeList");
   const classList = document.getElementById("classList");
@@ -312,6 +317,7 @@
   const recentBtn = document.getElementById("recentBtn");
   const refreshBtn = document.getElementById("refreshBtn");
   const materialToggleBtn = document.getElementById("materialToggleBtn");
+  const scoreResultToggleBtn = document.getElementById("scoreResultToggleBtn");
 
   function setMode(m){
     mode = m;
@@ -366,6 +372,29 @@
       collapsed = localStorage.getItem(MATERIAL_COLLAPSE_KEY) === "1";
     }catch(e){}
     setMaterialsCollapsed(collapsed);
+  }
+
+
+
+  function setScoreResultCollapsed(collapsed){
+    document.body.classList.toggle("score-result-collapsed", !!collapsed);
+    if(scoreResultToggleBtn){
+      scoreResultToggleBtn.textContent = collapsed ? "가채점/결과 펼치기" : "가채점/결과 접기";
+    }
+    try{
+      localStorage.setItem(SCORE_RESULT_COLLAPSE_KEY, collapsed ? "1" : "0");
+    }catch(e){}
+  }
+
+  function initScoreResultCollapsed(){
+    let collapsed = true;
+    try{
+      const saved = localStorage.getItem(SCORE_RESULT_COLLAPSE_KEY);
+      if(saved !== null){
+        collapsed = saved === "1";
+      }
+    }catch(e){}
+    setScoreResultCollapsed(collapsed);
   }
 
   function makeScienceDayKey(grade, school){
@@ -1015,9 +1044,18 @@
     };
   }
 
+
+  if(scoreResultToggleBtn){
+    scoreResultToggleBtn.onclick = () => {
+      const collapsed = !document.body.classList.contains("score-result-collapsed");
+      setScoreResultCollapsed(collapsed);
+    };
+  }
+
   renderGrades();
   updateApplyBtn();
   initMaterialsCollapsed();
+  initScoreResultCollapsed();
 </script>
 </body>
 </html>
