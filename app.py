@@ -155,8 +155,9 @@ def get_spreadsheet():
 # =========================================================
 END_CACHE = {
     "loaded": False,
+    "term": None,
     "end_school_map": {},
-    "updated_at": None
+    "updated_at": None,
 }
 END_CACHE_LOCK = threading.Lock()
 
@@ -204,26 +205,139 @@ def get_current_term_name(settings_ws):
     return header_name
 
 
-def build_end_school_map_from_rows(end_rows):
-    end_school_map = {}
+def normalize_record_term(term):
+    """records/settings/end에서 쓰는 시험 구분명을 화면 표기용으로 통일한다."""
+    t = (term or "").strip()
+    if t.endswith("_시험기간"):
+        return t[:-5]
+    return t
 
+
+def _norm_header_name(value):
+    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
+
+
+def _find_header_idx(headers, candidates):
+    normalized_candidates = {_norm_header_name(c) for c in candidates}
+    for idx, header in enumerate(headers or []):
+        if _norm_header_name(header) in normalized_candidates:
+            return idx
+    return None
+
+
+def _find_current_term_column_idx(headers, current_term_name):
+    """
+    end 시트가 wide 형태(예: grade/school/1학기_중간/1학기_기말/...)일 때
+    settings!A1에서 얻은 현재 학기에 해당하는 컬럼을 찾는다.
+    """
+    current_term_name = normalize_record_term(current_term_name)
+    if not current_term_name:
+        return None
+
+    normalized_current = _norm_header_name(current_term_name)
+    candidates = {
+        normalized_current,
+        _norm_header_name(f"{current_term_name}_시험범위"),
+        _norm_header_name(f"{current_term_name} 시험범위"),
+        _norm_header_name(f"{current_term_name}_단원"),
+        _norm_header_name(f"{current_term_name} 단원"),
+        _norm_header_name(f"{current_term_name}_units"),
+        _norm_header_name(f"{current_term_name}_codes"),
+    }
+
+    for idx, header in enumerate(headers or []):
+        if _norm_header_name(header) in candidates:
+            return idx
+    return None
+
+
+def get_end_column_indexes(end_rows, current_term_name=None):
+    """
+    end 시트 컬럼 위치를 헤더명 우선으로 찾는다.
+
+    지원 형태:
+    1) row 형태: timestamp / grade / school / units / semester
+    2) wide 형태: timestamp / grade / school / 1학기_중간 / 1학기_기말 / ...
+
+    wide 형태에서는 settings!A1의 현재 학기 컬럼을 units_source로 사용한다.
+    row 형태에서는 semester 컬럼으로 현재 학기를 필터링하고 units 컬럼을 사용한다.
+    """
+    headers = end_rows[0] if end_rows else []
+
+    grade_idx = _find_header_idx(headers, ["grade", "학년"])
+    school_idx = _find_header_idx(headers, ["school", "학교", "현재 학교"])
+    units_idx = _find_header_idx(headers, ["units", "unit", "단원", "시험범위", "codes", "code"])
+    semester_idx = _find_header_idx(headers, ["semester", "term", "학기", "시험구분", "시험", "currentTermName"])
+    current_term_idx = _find_current_term_column_idx(headers, current_term_name)
+
+    has_header = any(idx is not None for idx in (grade_idx, school_idx, units_idx, semester_idx, current_term_idx))
+
+    return {
+        "start_idx": 1 if has_header else 0,
+        "grade": grade_idx if grade_idx is not None else 1,
+        "school": school_idx if school_idx is not None else 2,
+        "units": units_idx if units_idx is not None else 3,
+        "semester": semester_idx if semester_idx is not None else (4 if has_header and current_term_idx is None else None),
+        "current_term_units": current_term_idx,
+    }
+
+
+def iter_end_entries(end_rows, current_term_name=None):
+    """
+    end 시트에서 현재 시험 구분에 해당하는 최종 시험범위만 추려낸다.
+
+    - wide 형태: 현재 학기 헤더(예: 1학기_기말) 컬럼의 값이 있는 행만 사용
+    - row 형태: semester 컬럼이 현재 학기와 일치하는 행만 사용
+    - 구형 형태: semester/current 학기 컬럼이 없으면 기존 호환을 위해 units 컬럼 사용
+    """
     if not end_rows:
-        return end_school_map
+        return []
 
-    start_idx = 0
-    if len(end_rows[0]) >= 3:
-        b0 = (end_rows[0][1] or "").strip().lower()
-        c0 = (end_rows[0][2] or "").strip().lower()
-        if b0 == "grade" or c0 == "school":
-            start_idx = 1
+    current_term_name = normalize_record_term(current_term_name)
+    idx = get_end_column_indexes(end_rows, current_term_name)
+    out = []
 
-    for row in end_rows[start_idx:]:
-        grade_val = row[1].strip() if len(row) > 1 and row[1] else ""
-        school_val = row[2].strip() if len(row) > 2 and row[2] else ""
+    for row in end_rows[idx["start_idx"]:]:
+        grade = (row[idx["grade"]] if len(row) > idx["grade"] else "").strip()
+        school_name = (row[idx["school"]] if len(row) > idx["school"] else "").strip()
 
-        if not grade_val or not school_val:
+        if grade not in GRADE_SHEETS or not school_name:
             continue
 
+        semester = ""
+        source_col = idx.get("current_term_units")
+
+        if source_col is not None:
+            # 현재 settings!A1에 해당하는 end 컬럼을 직접 읽는다.
+            codes_text = (row[source_col] if len(row) > source_col else "").strip()
+            semester = current_term_name
+            if not codes_text:
+                continue
+        else:
+            codes_text = (row[idx["units"]] if len(row) > idx["units"] else "").strip()
+            has_semester_col = idx["semester"] is not None
+            if has_semester_col:
+                semester = normalize_record_term(row[idx["semester"]] if len(row) > idx["semester"] else "")
+                if current_term_name and semester != current_term_name:
+                    continue
+
+        out.append({
+            "grade": grade,
+            "school": school_name,
+            "codes_text": codes_text,
+            "range_text": codes_text,
+            "semester": semester,
+        })
+
+    return out
+
+
+def build_end_school_map_from_rows(end_rows, current_term_name=None):
+    end_school_map = {}
+
+    for item in iter_end_entries(end_rows, current_term_name):
+        grade_val = item["grade"]
+        school_val = item["school"]
         end_school_map.setdefault(grade_val, set()).add(school_val)
 
     return {
@@ -232,24 +346,45 @@ def build_end_school_map_from_rows(end_rows):
     }
 
 
-def refresh_end_cache():
-    _, _, _, _, end_ws = survey_get_sheets()
+def refresh_end_cache(current_term_name=None):
+    _, _, _, settings_ws, end_ws = survey_get_sheets()
+    if current_term_name is None:
+        current_term_name = get_current_term_name(settings_ws)
+    current_term_name = normalize_record_term(current_term_name)
+
     end_rows = end_ws.get_all_values()
-    end_school_map = build_end_school_map_from_rows(end_rows)
+    end_school_map = build_end_school_map_from_rows(end_rows, current_term_name)
 
     with END_CACHE_LOCK:
         END_CACHE["loaded"] = True
+        END_CACHE["term"] = current_term_name
         END_CACHE["end_school_map"] = end_school_map
         END_CACHE["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     return END_CACHE
 
 
-def ensure_end_cache():
+def ensure_end_cache(current_term_name=None):
+    current_term_name = normalize_record_term(current_term_name)
     with END_CACHE_LOCK:
-        if END_CACHE["loaded"]:
+        if END_CACHE["loaded"] and END_CACHE.get("term") == current_term_name:
             return END_CACHE
-    return refresh_end_cache()
+    return refresh_end_cache(current_term_name)
+
+
+def get_records_start_idx(records_rows):
+    if not records_rows:
+        return 0
+
+    start_idx = 0
+    if len(records_rows[0]) >= 6:
+        c1 = (records_rows[0][1] or "").strip().lower()
+        c2 = (records_rows[0][2] or "").strip().lower()
+        c3 = (records_rows[0][3] or "").strip().lower()
+        if c1 == "grade" or c2 == "school" or c3 == "number":
+            start_idx = 1
+
+    return start_idx
 
 
 def build_saved_units_map(records_rows, current_term_name):
@@ -262,13 +397,8 @@ def build_saved_units_map(records_rows, current_term_name):
     if not records_rows:
         return saved_units_map
 
-    start_idx = 0
-    if len(records_rows[0]) >= 6:
-        c1 = (records_rows[0][1] or "").strip().lower()
-        c2 = (records_rows[0][2] or "").strip().lower()
-        c3 = (records_rows[0][3] or "").strip().lower()
-        if c1 == "grade" or c2 == "school" or c3 == "number":
-            start_idx = 1
+    start_idx = get_records_start_idx(records_rows)
+    current_term_name = normalize_record_term(current_term_name)
 
     dedup = set()
 
@@ -277,7 +407,7 @@ def build_saved_units_map(records_rows, current_term_name):
         school = (row[2] if len(row) > 2 else "").strip()
         number = (row[3] if len(row) > 3 else "").strip()
         unit = (row[4] if len(row) > 4 else "").strip()
-        term = (row[5] if len(row) > 5 else "").strip()
+        term = normalize_record_term(row[5] if len(row) > 5 else "")
 
         if not grade or not school or not number or not unit:
             continue
@@ -299,6 +429,48 @@ def build_saved_units_map(records_rows, current_term_name):
             school_map[school] = sorted(items, key=lambda x: ((x.get("number") or ""), (x.get("unit") or "")))
 
     return saved_units_map
+
+
+def build_prior_unit_terms_map(records_rows, current_term_name):
+    """
+    현재 기준이 아닌 과거 시험범위 조사 기록을 단원별 라벨로 만든다.
+    grade -> school -> "number__unit" -> [term, ...]
+    """
+    prior_terms_map = {}
+
+    if not records_rows:
+        return prior_terms_map
+
+    start_idx = get_records_start_idx(records_rows)
+    current_term_name = normalize_record_term(current_term_name)
+    dedup = set()
+
+    for row in records_rows[start_idx:]:
+        grade = (row[1] if len(row) > 1 else "").strip()
+        school = (row[2] if len(row) > 2 else "").strip()
+        number = (row[3] if len(row) > 3 else "").strip()
+        unit = (row[4] if len(row) > 4 else "").strip()
+        term = normalize_record_term(row[5] if len(row) > 5 else "")
+
+        if not grade or not school or not number or not unit or not term:
+            continue
+        if current_term_name and term == current_term_name:
+            continue
+
+        key = f"{number}__{unit}"
+        dedup_key = (grade, school, key, term)
+        if dedup_key in dedup:
+            continue
+        dedup.add(dedup_key)
+
+        prior_terms_map.setdefault(grade, {}).setdefault(school, {}).setdefault(key, []).append(term)
+
+    for grade, school_map in prior_terms_map.items():
+        for school, unit_map in school_map.items():
+            for key, terms in unit_map.items():
+                unit_map[key] = sorted(terms)
+
+    return prior_terms_map
 
 
 def get_survey_class_data():
@@ -720,9 +892,17 @@ def school_sort_key(science_date, exam_period, school_name):
 def refresh_generate_cache():
     service = get_sheets_service(readonly=True)
 
+    settings_res = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range="settings!A1"
+    ).execute()
+    current_term_name = normalize_record_term(
+        ((settings_res.get("values") or [[""]])[0][0] if settings_res.get("values") else "")
+    )
+
     end_res = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_END}!A2:D"
+        range=f"{SHEET_END}!A:Z"
     ).execute()
     end_rows = end_res.get("values", [])
 
@@ -742,14 +922,15 @@ def refresh_generate_cache():
     unit_codes_by_grade_school = {"1": {}, "2": {}, "3": {}}
     surveyed_school_set_by_grade = {"1": set(), "2": set(), "3": set()}
     unit_name_map_by_grade = {"1": {}, "2": {}, "3": {}}
+    end_range_by_grade_school = {"1": {}, "2": {}, "3": {}}
 
-    for row in end_rows:
-        grade = row[1].strip() if len(row) > 1 and row[1] else ""
-        school_name = row[2].strip() if len(row) > 2 and row[2] else ""
-        codes_text = row[3].strip() if len(row) > 3 and row[3] else ""
+    for item in iter_end_entries(end_rows, current_term_name):
+        grade = item["grade"]
+        school_name = item["school"]
+        codes_text = item["codes_text"]
 
-        if grade not in GRADE_SHEETS or not school_name:
-            continue
+        # 자료생성의 단원코드와 시험범위 표시는 모두 end 시트의 현재 semester 컬럼/행을 기준으로 한다.
+        end_range_by_grade_school[grade][school_name] = item.get("range_text") or codes_text
 
         codes = [u.strip() for u in codes_text.split(",") if u.strip()]
         if codes:
@@ -805,7 +986,9 @@ def refresh_generate_cache():
 
         for row in grade_rows:
             school_name = row[0].strip() if len(row) > 0 and row[0] else ""
-            range_text = row[1].strip() if len(row) > 1 and row[1] else ""
+            # M시트의 시험범위(D열)는 이전 시험 범위가 남아 있을 수 있으므로
+            # 자료생성 카드에는 end 시트의 현재 semester 시험범위만 보여준다.
+            range_text = (end_range_by_grade_school.get(grade, {}) or {}).get(school_name, "")
             exam_period = row[2].strip() if len(row) > 2 and row[2] else ""
             science_date = row[3].strip() if len(row) > 3 and row[3] else ""
 
@@ -1222,8 +1405,11 @@ def survey_api_data():
 
         current_term_name = get_current_term_name(settings_ws)
         saved_units_map = build_saved_units_map(records_rows, current_term_name)
+        prior_unit_terms_map = build_prior_unit_terms_map(records_rows, current_term_name)
 
-        end_cache = ensure_end_cache()
+        # 파란색 표시는 records 누적 로그가 아니라 end 시트의 현재 semester 최종본 기준으로만 반영한다.
+        # settings!A1을 1학기_기말, 2학기_중간 등으로 바꾸면 end의 semester 필터도 자동으로 전환된다.
+        end_cache = ensure_end_cache(current_term_name)
 
         return jsonify({
             "ok": True,
@@ -1234,6 +1420,7 @@ def survey_api_data():
             "classStudentsByGrade": class_students_by_grade,
             "unitsByGrade": units_by_grade,
             "savedUnitsByGradeSchool": saved_units_map,
+            "priorUnitTermsByGradeSchool": prior_unit_terms_map,
             "currentSortHeader": get_current_sort_header(settings_ws),
             "currentTermName": current_term_name,
             "endSchoolMap": end_cache["end_school_map"],
@@ -1279,7 +1466,7 @@ def survey_api_save():
             return jsonify({"ok": False, "error": "grade, school, units 정보가 필요합니다."}), 400
 
         today = datetime.date.today().isoformat()
-        current_term_name = get_current_term_name(settings_ws)
+        current_term_name = normalize_record_term(get_current_term_name(settings_ws))
 
         rows = []
         for item in units:
