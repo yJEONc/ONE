@@ -892,123 +892,80 @@ def school_sort_key(science_date, exam_period, school_name):
 def refresh_generate_cache():
     service = get_sheets_service(readonly=True)
 
-    # -----------------------------------------------------
-    # 현재 시험 기준(settings!A1)
-    # 예:
-    #   1학기_중간_시험기간 -> 1-1
-    #   1학기_기말_시험기간 -> 1-2
-    #   2학기_중간_시험기간 -> 2-1
-    #   2학기_기말_시험기간 -> 2-2
-    # -----------------------------------------------------
     settings_res = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range="settings!A1"
     ).execute()
-
     current_setting = (
-        ((settings_res.get("values") or [[""]])[0][0])
-        if settings_res.get("values")
-        else ""
+        ((settings_res.get("values") or [[""]])[0][0] if settings_res.get("values") else "")
     ).strip()
 
     current_term_name = normalize_record_term(current_setting)
 
-    exam_suffix_map = {
+    current_exam_suffix = {
         "1학기_중간_시험기간": "1-1",
         "1학기_기말_시험기간": "1-2",
         "2학기_중간_시험기간": "2-1",
         "2학기_기말_시험기간": "2-2",
-    }
-    current_exam_suffix = exam_suffix_map.get(current_setting, "")
+    }.get(current_setting, "")
 
-    if not current_exam_suffix:
-        raise RuntimeError(
-            f"settings!A1 값이 올바르지 않습니다: {current_setting} "
-            f"(허용값: {', '.join(exam_suffix_map.keys())})"
-        )
-
-    # -----------------------------------------------------
-    # end: 현재 시험의 시험범위
-    # -----------------------------------------------------
     end_res = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range=f"{SHEET_END}!A:Z"
     ).execute()
     end_rows = end_res.get("values", [])
 
-    # -----------------------------------------------------
-    # units: 단원 코드 -> 단원명
-    # -----------------------------------------------------
     units_res = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range=f"{SHEET_UNITS}!A2:C"
     ).execute()
     units_rows = units_res.get("values", [])
 
-    # -----------------------------------------------------
-    # class+: 학교 목록 / 시험기간 fallback 용
-    # I:S 범위 기준
-    # I = 학교명
-    # R = 시험기간
-    # S = 과학일(구데이터라 자료생성에서는 사용하지 않음)
-    # -----------------------------------------------------
     school_res = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range=f"{SHEET_SCHOOL}!I2:S"
     ).execute()
     school_rows = school_res.get("values", [])
 
-    # -----------------------------------------------------
-    # raw1학기일정: 현재 시험의 과학일
-    # 예) settings=A1이 2학기_중간_시험기간이면
-    # 1학년 -> 1-2-1-과학일
-    # 2학년 -> 2-2-1-과학일
-    # 3학년 -> 3-2-1-과학일
-    # -----------------------------------------------------
-    raw_res = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"{RAW_SCHEDULE_SHEET}!A:AZ"
-    ).execute()
-    raw_rows = raw_res.get("values", [])
+    # 현재 시험(settings!A1)에 해당하는 과학일은 raw1학기일정에서 읽는다.
+    # 기존 자료생성 로직은 그대로 두고, 과학일 데이터 소스만 교체한다.
+    science_date_by_grade_school = {"1": {}, "2": {}, "3": {}}
 
-    science_date_by_grade_school = {
-        "1": {},
-        "2": {},
-        "3": {},
-    }
+    if current_exam_suffix:
+        raw_res = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{RAW_SCHEDULE_SHEET}!A:AZ"
+        ).execute()
+        raw_rows = raw_res.get("values", [])
 
-    if raw_rows:
-        raw_headers = raw_rows[0]
-        school_idx = _find_header_idx(raw_headers, ["school", "학교", "현재 학교"])
+        if raw_rows:
+            raw_headers = raw_rows[0]
+            raw_school_idx = _find_header_idx(raw_headers, ["school", "학교", "현재 학교"])
 
-        if school_idx is None:
-            raise RuntimeError(
-                f"{RAW_SCHEDULE_SHEET} 시트에서 school 헤더를 찾을 수 없습니다."
-            )
+            if raw_school_idx is not None:
+                for raw_grade in ("1", "2", "3"):
+                    raw_science_idx = _find_header_idx(
+                        raw_headers,
+                        [f"{raw_grade}-{current_exam_suffix}-과학일"]
+                    )
 
-        for grade in ("1", "2", "3"):
-            target_header = f"{grade}-{current_exam_suffix}-과학일"
-            science_idx = _find_header_idx(raw_headers, [target_header])
+                    if raw_science_idx is None:
+                        continue
 
-            if science_idx is None:
-                raise RuntimeError(
-                    f"{RAW_SCHEDULE_SHEET} 시트에서 '{target_header}' 헤더를 찾을 수 없습니다."
-                )
+                    for raw_row in raw_rows[1:]:
+                        raw_school = (
+                            raw_row[raw_school_idx].strip()
+                            if len(raw_row) > raw_school_idx and raw_row[raw_school_idx]
+                            else ""
+                        )
+                        raw_science_date = (
+                            raw_row[raw_science_idx].strip()
+                            if len(raw_row) > raw_science_idx and raw_row[raw_science_idx]
+                            else ""
+                        )
 
-            for row in raw_rows[1:]:
-                school_name = (
-                    row[school_idx].strip()
-                    if len(row) > school_idx and row[school_idx]
-                    else ""
-                )
-                science_date = (
-                    row[science_idx].strip()
-                    if len(row) > science_idx and row[science_idx]
-                    else ""
-                )
-
-                if school_name:
-                    science_date_by_grade_school[grade][school_name] = science_date
+                        if raw_school:
+                            science_date_by_grade_school[raw_grade][raw_school] = raw_science_date
 
     best_by_school = {}
     unit_codes_by_grade_school = {"1": {}, "2": {}, "3": {}}
@@ -1016,17 +973,13 @@ def refresh_generate_cache():
     unit_name_map_by_grade = {"1": {}, "2": {}, "3": {}}
     end_range_by_grade_school = {"1": {}, "2": {}, "3": {}}
 
-    # -----------------------------------------------------
-    # end 시트 -> 현재 시험범위/단원코드
-    # -----------------------------------------------------
     for item in iter_end_entries(end_rows, current_term_name):
         grade = item["grade"]
         school_name = item["school"]
         codes_text = item["codes_text"]
 
-        end_range_by_grade_school[grade][school_name] = (
-            item.get("range_text") or codes_text
-        )
+        # 자료생성의 단원코드와 시험범위 표시는 모두 end 시트의 현재 semester 컬럼/행을 기준으로 한다.
+        end_range_by_grade_school[grade][school_name] = item.get("range_text") or codes_text
 
         codes = [u.strip() for u in codes_text.split(",") if u.strip()]
         if codes:
@@ -1035,9 +988,6 @@ def refresh_generate_cache():
         else:
             unit_codes_by_grade_school[grade].setdefault(school_name, [])
 
-    # -----------------------------------------------------
-    # units 시트 -> 단원명
-    # -----------------------------------------------------
     for row in units_rows:
         grade = row[0].strip() if len(row) > 0 and row[0] else ""
         code = row[1].strip() if len(row) > 1 and row[1] else ""
@@ -1048,28 +998,20 @@ def refresh_generate_cache():
 
         unit_name_map_by_grade[grade][code] = unit_name
 
-    # -----------------------------------------------------
-    # class+ -> 전체 학교 목록 정렬용 메타
-    # 과학일은 class+ S열을 쓰지 않고 raw 일정에서 학년별로 읽는다.
-    # 여기서는 시험기간만 fallback 용으로 보관한다.
-    # -----------------------------------------------------
     for row in school_rows:
         school_name = row[0].strip() if len(row) > 0 and row[0] else ""
         exam_period = row[9].strip() if len(row) > 9 and row[9] else ""
+        science_date = row[10].strip() if len(row) > 10 and row[10] else ""
 
         if not school_name:
             continue
 
-        # 학년 구분이 없는 전체 학교목록 정렬용이므로 과학일은 빈 값으로 둔다.
-        current_key = school_sort_key("", exam_period, school_name)
+        current_key = school_sort_key(science_date, exam_period, school_name)
 
-        if (
-            school_name not in best_by_school
-            or current_key < best_by_school[school_name]["sort_key"]
-        ):
+        if school_name not in best_by_school or current_key < best_by_school[school_name]["sort_key"]:
             best_by_school[school_name] = {
                 "school": school_name,
-                "science_date": "",
+                "science_date": science_date,
                 "exam_period": exam_period,
                 "sort_key": current_key,
             }
@@ -1082,12 +1024,6 @@ def refresh_generate_cache():
     grade_school_map = {"1": [], "2": [], "3": []}
     school_meta_by_grade = {"1": {}, "2": {}, "3": {}}
 
-    # -----------------------------------------------------
-    # M1/M2/M3의 학생-학교 목록을 기준으로 카드 생성
-    # 시험범위: end 현재 시험
-    # 시험기간: M시트 값 우선, class+ fallback
-    # 과학일: raw1학기일정 현재 시험값만 사용
-    # -----------------------------------------------------
     for grade, sheet_name in GRADE_SHEETS.items():
         grade_res = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
@@ -1099,39 +1035,21 @@ def refresh_generate_cache():
 
         for row in grade_rows:
             school_name = row[0].strip() if len(row) > 0 and row[0] else ""
+            # M시트의 시험범위(D열)는 이전 시험 범위가 남아 있을 수 있으므로
+            # 자료생성 카드에는 end 시트의 현재 semester 시험범위만 보여준다.
+            range_text = (end_range_by_grade_school.get(grade, {}) or {}).get(school_name, "")
+            exam_period = row[2].strip() if len(row) > 2 and row[2] else ""
+            science_date = (
+                science_date_by_grade_school.get(grade, {}).get(school_name, "")
+            )
 
             if not school_name:
                 continue
 
-            # 시험범위는 end 시트의 현재 시험값만 사용
-            range_text = (
-                (end_range_by_grade_school.get(grade, {}) or {})
-                .get(school_name, "")
-            )
-
-            # M시트 E열(이 범위 C:F에서는 index 2) 시험기간
-            exam_period = row[2].strip() if len(row) > 2 and row[2] else ""
-
-            # 중요:
-            # M시트 F열의 과학일은 예전 시험 데이터일 수 있으므로 사용하지 않는다.
-            # raw1학기일정에서 현재 settings에 해당하는 과학일만 사용한다.
-            science_date = (
-                (science_date_by_grade_school.get(grade, {}) or {})
-                .get(school_name, "")
-            )
-
             fallback_meta = best_by_school.get(school_name, {})
-            effective_exam_period = (
-                exam_period
-                or fallback_meta.get("exam_period", "")
-            )
+            effective_exam_period = exam_period or fallback_meta.get("exam_period", "")
             effective_science_date = science_date
-
-            current_key = school_sort_key(
-                effective_science_date,
-                effective_exam_period,
-                school_name
-            )
+            current_key = school_sort_key(effective_science_date, effective_exam_period, school_name)
 
             candidate = {
                 "school": school_name,
@@ -1141,25 +1059,12 @@ def refresh_generate_cache():
                 "sort_key": current_key,
             }
 
-            if (
-                school_name not in best_for_grade
-                or current_key < best_for_grade[school_name]["sort_key"]
-            ):
+            if school_name not in best_for_grade or current_key < best_for_grade[school_name]["sort_key"]:
                 best_for_grade[school_name] = candidate
 
-        sorted_items = sorted(
-            best_for_grade.values(),
-            key=lambda x: x["sort_key"]
-        )
-
-        grade_school_map[grade] = [
-            item["school"] for item in sorted_items
-        ]
-
-        school_meta_by_grade[grade] = {
-            item["school"]: item
-            for item in sorted_items
-        }
+        sorted_items = sorted(best_for_grade.values(), key=lambda x: x["sort_key"])
+        grade_school_map[grade] = [item["school"] for item in sorted_items]
+        school_meta_by_grade[grade] = {item["school"]: item for item in sorted_items}
 
     CACHE.clear()
     CACHE.update({
@@ -1175,14 +1080,7 @@ def refresh_generate_cache():
         "loaded_at": time.time(),
     })
 
-    del (
-        end_rows,
-        units_rows,
-        school_rows,
-        raw_rows,
-        best_by_school,
-        science_date_by_grade_school,
-    )
+    del end_rows, units_rows, school_rows, best_by_school
     gc.collect()
 
 
