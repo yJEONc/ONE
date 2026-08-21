@@ -137,7 +137,7 @@ def get_google_credentials(scopes):
 def get_sheets_service(readonly=False):
     scopes = SCOPES_READONLY if readonly else SCOPES_RW
     creds = get_google_credentials(scopes)
-    return build("sheets", "v4", credentials=creds)
+    return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
 def get_gspread_client():
@@ -734,6 +734,18 @@ def get_manage_grade_rows(grade, force_refresh=False):
     now = time.time()
 
     with MANAGE_LOCK:
+        # 기존 TTL(10분)은 그대로 유지하되,
+        # 시간이 지난 다른 학년 캐시도 실제 메모리에서 제거한다.
+        for g in ("1", "2", "3"):
+            loaded_at_g = MANAGE_CACHE["loaded_at"].get(g)
+            if (
+                MANAGE_CACHE.get(g) is not None
+                and loaded_at_g is not None
+                and (now - loaded_at_g) >= MANAGE_CACHE_TTL
+            ):
+                MANAGE_CACHE[g] = None
+                MANAGE_CACHE["loaded_at"][g] = None
+
         rows = MANAGE_CACHE.get(grade)
         loaded_at = MANAGE_CACHE["loaded_at"].get(grade)
 
@@ -753,6 +765,7 @@ def clear_manage_cache():
         for g in ("1", "2", "3"):
             MANAGE_CACHE[g] = None
             MANAGE_CACHE["loaded_at"][g] = None
+    gc.collect()
 
 
 def get_manage_cache_status():
